@@ -112,13 +112,13 @@ public final class BootstrapMockRuntimeDriver implements Driver {
         return Logger.getGlobal();
     }
     
-    private static Connection createConnection(final String jdbcUrl) {
-        ConnectionState state = new ConnectionState(jdbcUrl);
+    private Connection createConnection(final String jdbcUrl) {
+        final ConnectionState state = new ConnectionState(jdbcUrl);
         return (Connection) Proxy.newProxyInstance(BootstrapMockRuntimeDriver.class.getClassLoader(),
                 new Class[]{Connection.class}, (proxy, method, args) -> handleConnectionMethod(state, proxy, method, args));
     }
     
-    private static Object handleConnectionMethod(final ConnectionState state, final Object proxy, final Method method, final Object[] args) {
+    private Object handleConnectionMethod(final ConnectionState state, final Object proxy, final Method method, final Object[] args) {
         String methodName = method.getName();
         if ("getMetaData".equals(methodName)) {
             return createDatabaseMetaData(state.jdbcUrl);
@@ -136,12 +136,12 @@ public final class BootstrapMockRuntimeDriver implements Driver {
         return handleCommonObjectMethod(proxy, method, args);
     }
     
-    private static DatabaseMetaData createDatabaseMetaData(final String jdbcUrl) {
+    private DatabaseMetaData createDatabaseMetaData(final String jdbcUrl) {
         return (DatabaseMetaData) Proxy.newProxyInstance(BootstrapMockRuntimeDriver.class.getClassLoader(),
                 new Class[]{DatabaseMetaData.class}, (proxy, method, args) -> handleDatabaseMetaDataMethod(jdbcUrl, proxy, method, args));
     }
     
-    private static Object handleDatabaseMetaDataMethod(final String jdbcUrl, final Object proxy, final Method method, final Object[] args) {
+    private Object handleDatabaseMetaDataMethod(final String jdbcUrl, final Object proxy, final Method method, final Object[] args) {
         String methodName = method.getName();
         if ("getDatabaseProductName".equals(methodName)) {
             return DATABASE_PRODUCT_NAME;
@@ -164,28 +164,28 @@ public final class BootstrapMockRuntimeDriver implements Driver {
         return handleCommonObjectMethod(proxy, method, args);
     }
     
-    private static ResultSet createTablesResultSet(final String[] types) {
+    private ResultSet createTablesResultSet(final String[] types) {
         if (null != types && !List.of(types).contains("TABLE")) {
             return createResultSet(List.of());
         }
         return createResultSet(TABLE_NAMES.stream().map(each -> Map.of("TABLE_NAME", each)).toList());
     }
     
-    private static ResultSet createColumnsResultSet(final String objectName) {
+    private ResultSet createColumnsResultSet(final String objectName) {
         return createResultSet(TABLE_COLUMNS.getOrDefault(objectName, List.of()).stream().map(each -> Map.of("COLUMN_NAME", each)).toList());
     }
     
-    private static ResultSet createIndexesResultSet(final String tableName) {
+    private ResultSet createIndexesResultSet(final String tableName) {
         return createResultSet(TABLE_INDEXES.getOrDefault(tableName, List.of()).stream().map(each -> Map.of("INDEX_NAME", each)).toList());
     }
     
-    private static ResultSet createResultSet(final List<Map<String, String>> rows) {
-        ResultSetState state = new ResultSetState(rows);
+    private ResultSet createResultSet(final List<Map<String, String>> rows) {
+        final ResultSetState state = new ResultSetState(rows);
         return (ResultSet) Proxy.newProxyInstance(BootstrapMockRuntimeDriver.class.getClassLoader(),
                 new Class[]{ResultSet.class}, (proxy, method, args) -> handleResultSetMethod(state, proxy, method, args));
     }
     
-    private static Object handleResultSetMethod(final ResultSetState state, final Object proxy, final Method method, final Object[] args) {
+    private Object handleResultSetMethod(final ResultSetState state, final Object proxy, final Method method, final Object[] args) {
         String methodName = method.getName();
         if ("next".equals(methodName)) {
             if (state.rowIndex + 1 < state.rows.size()) {
@@ -211,7 +211,7 @@ public final class BootstrapMockRuntimeDriver implements Driver {
         return handleCommonObjectMethod(proxy, method, args);
     }
     
-    private static Object handleCommonObjectMethod(final Object proxy, final Method method, final Object[] args) {
+    private Object handleCommonObjectMethod(final Object proxy, final Method method, final Object[] args) {
         String methodName = method.getName();
         if ("toString".equals(methodName)) {
             return proxy.getClass().getName();
@@ -231,7 +231,7 @@ public final class BootstrapMockRuntimeDriver implements Driver {
         return getDefaultValue(method.getReturnType());
     }
     
-    private static Object getDefaultValue(final Class<?> returnType) {
+    private Object getDefaultValue(final Class<?> returnType) {
         if (!returnType.isPrimitive()) {
             return null;
         }
