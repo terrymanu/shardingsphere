@@ -17,12 +17,20 @@
 
 package org.apache.shardingsphere.mcp.bootstrap.transport.server.http;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import org.apache.shardingsphere.infra.util.json.JsonUtils;
+import org.apache.shardingsphere.mcp.bootstrap.MCPRuntimeLauncher;
+import org.apache.shardingsphere.mcp.bootstrap.config.HttpTransportConfiguration;
+import org.apache.shardingsphere.mcp.bootstrap.config.MCPLaunchConfiguration;
+import org.apache.shardingsphere.mcp.bootstrap.config.StdioTransportConfiguration;
 import org.apache.shardingsphere.mcp.bootstrap.transport.MCPTransportConstants;
+import org.apache.shardingsphere.mcp.bootstrap.transport.server.MCPRuntimeServer;
 import org.apache.shardingsphere.mcp.metadata.jdbc.RuntimeDatabaseConfiguration;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -30,6 +38,7 @@ import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -39,19 +48,41 @@ import static org.hamcrest.Matchers.is;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-class StreamableHttpTransportIT extends AbstractStreamableHttpIT {
+class StreamableHttpTransportIT {
+    
+    private static final String ACCESS_TOKEN = "test-access-token";
     
     private static final String DATABASE_TYPE = "MySQL";
     
     private static final String DATABASE_VERSION = "8.0.36";
     
     private static final String JDBC_URL = "jdbc:mysql://bootstrap-http/test";
+    
+    private static final String LOOPBACK_BIND_HOST = "127.0.0.1";
+    
+    private static final String ENDPOINT_PATH = "/gateway";
+    
+    private static final String PROTOCOL_VERSION = MCPTransportConstants.PROTOCOL_VERSION;
+    
+    private static final String CONTENT_TYPE = "application/json";
+    
+    private static final String JSON_ACCEPT = "application/json, text/event-stream";
+    
+    private StreamableHttpMCPServer httpServer;
+    
+    @AfterEach
+    void tearDown() {
+        if (null != httpServer) {
+            httpServer.stop();
+            httpServer = null;
+        }
+    }
     
     @Test
     void assertLaunchHttpServerWithConfiguredEndpoint() throws IOException, InterruptedException, SQLException {
@@ -237,21 +268,189 @@ class StreamableHttpTransportIT extends AbstractStreamableHttpIT {
         assertThat(actualResponse.statusCode(), is(200));
     }
     
-    @Override
-    protected Map<String, RuntimeDatabaseConfiguration> createRuntimeDatabases() {
-        return Map.of("logic_db", createRuntimeDatabaseConfiguration());
+    private RuntimeHttpSession launchRuntime() throws SQLException, IOException, InterruptedException {
+        return launchRuntime("");
     }
     
-    private RuntimeDatabaseConfiguration createRuntimeDatabaseConfiguration() {
-        try {
-            Connection connection = createMetadataConnection();
-            RuntimeDatabaseConfiguration result = mock(RuntimeDatabaseConfiguration.class);
-            when(result.getDatabaseType()).thenReturn(DATABASE_TYPE);
-            when(result.openConnection(anyString())).thenReturn(connection);
-            return result;
-        } catch (final SQLException ex) {
-            throw new IllegalStateException(ex);
+    private RuntimeHttpSession launchRuntime(final String accessToken) throws SQLException, IOException, InterruptedException {
+        launchJDBCRuntime(LOOPBACK_BIND_HOST, false, accessToken);
+        HttpClient httpClient = HttpClient.newHttpClient();
+        return new RuntimeHttpSession(httpClient, initializeSession(httpClient, accessToken), accessToken);
+    }
+    
+    private RuntimeHttpSession launchRuntimeWithAccessToken() throws SQLException, IOException, InterruptedException {
+        return launchRuntime(ACCESS_TOKEN);
+    }
+    
+    private void launchJDBCRuntime() throws SQLException, IOException {
+        launchJDBCRuntime(LOOPBACK_BIND_HOST, false, "");
+    }
+    
+    private void launchJDBCRuntime(final String bindHost, final boolean allowRemoteAccess, final String accessToken) throws SQLException, IOException {
+        HttpTransportConfiguration httpConfig = new HttpTransportConfiguration(true, bindHost, allowRemoteAccess, accessToken, 0, ENDPOINT_PATH);
+        MCPLaunchConfiguration launchConfig = new MCPLaunchConfiguration(httpConfig, new StdioTransportConfiguration(false),
+                Map.of("logic_db", createRuntimeDatabaseConfiguration()));
+        httpServer = launchHttpServer(launchConfig);
+    }
+    
+    private StreamableHttpMCPServer launchHttpServer(final MCPLaunchConfiguration launchConfig) throws IOException {
+        MCPRuntimeServer actual = new MCPRuntimeLauncher().launch(launchConfig);
+        if (actual instanceof StreamableHttpMCPServer) {
+            return (StreamableHttpMCPServer) actual;
         }
+        actual.stop();
+        throw new IllegalStateException("HTTP server must be enabled for HTTP integration tests.");
+    }
+    
+    private String initializeSession(final HttpClient httpClient, final String accessToken) throws IOException, InterruptedException {
+        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder(createEndpointUri())
+                .header("Content-Type", CONTENT_TYPE)
+                .header("Accept", JSON_ACCEPT)
+                .POST(HttpRequest.BodyPublishers.ofString(JsonUtils.toJsonString(Map.of(
+                        "jsonrpc", "2.0",
+                        "id", "init-1",
+                        "method", "initialize",
+                        "params", createInitializeRequestParams("jdbc-runtime-integration")))));
+        addAuthorizationHeader(requestBuilder, accessToken);
+        HttpResponse<String> actual = httpClient.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
+        assertThat(actual.statusCode(), is(200));
+        return actual.headers().firstValue("MCP-Session-Id").orElseThrow();
+    }
+    
+    private URI createEndpointUri() {
+        return URI.create(String.format("http://%s:%d%s", LOOPBACK_BIND_HOST, httpServer.getLocalPort(), ENDPOINT_PATH));
+    }
+    
+    private HttpResponse<String> sendToolCallRequest(final HttpClient httpClient, final String sessionId,
+                                                     final String toolName, final Map<String, Object> arguments) throws IOException, InterruptedException {
+        return sendToolCallRequest(httpClient, sessionId, "", toolName, arguments);
+    }
+    
+    private HttpResponse<String> sendToolCallRequest(final HttpClient httpClient, final String sessionId, final String accessToken,
+                                                     final String toolName, final Map<String, Object> arguments) throws IOException, InterruptedException {
+        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder(createEndpointUri())
+                .header("Content-Type", CONTENT_TYPE)
+                .header("Accept", JSON_ACCEPT)
+                .header("MCP-Session-Id", sessionId)
+                .header("MCP-Protocol-Version", PROTOCOL_VERSION)
+                .POST(HttpRequest.BodyPublishers.ofString(JsonUtils.toJsonString(Map.of(
+                        "jsonrpc", "2.0",
+                        "id", toolName + "-1",
+                        "method", "tools/call",
+                        "params", Map.of("name", toolName, "arguments", arguments)))));
+        addAuthorizationHeader(requestBuilder, accessToken);
+        return httpClient.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
+    }
+    
+    private HttpResponse<String> sendDeleteRequest(final HttpClient httpClient, final String sessionId) throws IOException, InterruptedException {
+        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder(createEndpointUri())
+                .header("MCP-Session-Id", sessionId)
+                .header("MCP-Protocol-Version", PROTOCOL_VERSION)
+                .DELETE();
+        return httpClient.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
+    }
+    
+    private HttpResponse<String> sendDeleteRequest(final HttpClient httpClient, final Map<String, String> requestHeaders) throws IOException, InterruptedException {
+        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder(createEndpointUri()).DELETE();
+        requestHeaders.forEach(requestBuilder::header);
+        return httpClient.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
+    }
+    
+    private Map<String, Object> getStructuredContent(final String responseBody) {
+        Map<String, Object> result = getJsonRpcResult(responseBody);
+        return result.containsKey("structuredContent") ? castToMap(result.get("structuredContent")) : Map.of();
+    }
+    
+    private List<Map<String, Object>> getPayloadItems(final Map<String, Object> payload) {
+        return castToList(payload.get("items"));
+    }
+    
+    private Map<String, Object> getResourcePayload(final String responseBody) {
+        return parseJsonBody(String.valueOf(getResultContents(responseBody).get(0).get("text")));
+    }
+    
+    private Map<String, Object> getJsonRpcResult(final String responseBody) {
+        return castToMap(parseJsonBody(responseBody).get("result"));
+    }
+    
+    private Map<String, Object> createInitializeRequestParams(final String clientName) {
+        Map<String, Object> result = new LinkedHashMap<>(3, 1F);
+        result.put("protocolVersion", PROTOCOL_VERSION);
+        result.put("capabilities", Map.of());
+        result.put("clientInfo", Map.of("name", clientName, "version", "1.0.0"));
+        return result;
+    }
+    
+    private Map<String, String> createJsonRequestHeaders() {
+        Map<String, String> result = new LinkedHashMap<>(2, 1F);
+        result.put("Content-Type", CONTENT_TYPE);
+        result.put("Accept", JSON_ACCEPT);
+        return result;
+    }
+    
+    private Map<String, String> createJsonRequestHeaders(final Map<String, String> additionalHeaders) {
+        Map<String, String> result = new LinkedHashMap<>(2 + additionalHeaders.size(), 1F);
+        result.putAll(createJsonRequestHeaders());
+        result.putAll(additionalHeaders);
+        return result;
+    }
+    
+    private Map<String, Object> parseJsonBody(final String responseBody) {
+        return JsonUtils.fromJsonString(normalizeJsonBody(responseBody), new TypeReference<>() {
+        });
+    }
+    
+    private Map<String, Object> castToMap(final Object value) {
+        return JsonUtils.fromJsonString(JsonUtils.toJsonString(value), new TypeReference<>() {
+        });
+    }
+    
+    private List<Map<String, Object>> getResultContents(final String responseBody) {
+        return castToList(getJsonRpcResult(responseBody).get("contents"));
+    }
+    
+    private List<Map<String, Object>> castToList(final Object value) {
+        return JsonUtils.fromJsonString(JsonUtils.toJsonString(value), new TypeReference<>() {
+        });
+    }
+    
+    private String normalizeJsonBody(final String responseBody) {
+        String trimmedResponseBody = responseBody.trim();
+        if (trimmedResponseBody.startsWith("{") || trimmedResponseBody.startsWith("[")) {
+            return trimmedResponseBody;
+        }
+        StringBuilder result = new StringBuilder();
+        boolean hasDataLine = false;
+        for (String each : trimmedResponseBody.split("\\R")) {
+            String currentLine = each.trim();
+            if (!currentLine.startsWith("data:")) {
+                continue;
+            }
+            if (hasDataLine) {
+                result.append(System.lineSeparator());
+            }
+            result.append(currentLine.substring("data:".length()).trim());
+            hasDataLine = true;
+        }
+        return hasDataLine ? result.toString() : trimmedResponseBody;
+    }
+    
+    private String getAuthorizationHeaderValue(final String accessToken) {
+        return "Bearer " + accessToken;
+    }
+    
+    private void addAuthorizationHeader(final HttpRequest.Builder requestBuilder, final String accessToken) {
+        if (!accessToken.isEmpty()) {
+            requestBuilder.header("Authorization", getAuthorizationHeaderValue(accessToken));
+        }
+    }
+    
+    private RuntimeDatabaseConfiguration createRuntimeDatabaseConfiguration() throws SQLException {
+        Connection connection = createMetadataConnection();
+        RuntimeDatabaseConfiguration result = mock(RuntimeDatabaseConfiguration.class);
+        when(result.getDatabaseType()).thenReturn(DATABASE_TYPE);
+        when(result.openConnection(anyString())).thenReturn(connection);
+        return result;
     }
     
     private Connection createMetadataConnection() throws SQLException {
@@ -311,12 +510,6 @@ class StreamableHttpTransportIT extends AbstractStreamableHttpIT {
                 "params", Map.of("uri", "shardingsphere://capabilities")));
     }
     
-    private HttpResponse<String> sendDeleteRequest(final HttpClient httpClient, final Map<String, String> requestHeaders) throws IOException, InterruptedException {
-        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder(createEndpointUri()).DELETE();
-        requestHeaders.forEach(requestBuilder::header);
-        return httpClient.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
-    }
-    
     private HttpResponse<String> openEventStream(final HttpClient httpClient, final Map<String, String> requestHeaders) throws IOException, InterruptedException {
         HttpRequest.Builder requestBuilder = HttpRequest.newBuilder(createEndpointUri()).GET();
         requestHeaders.forEach(requestBuilder::header);
@@ -334,6 +527,9 @@ class StreamableHttpTransportIT extends AbstractStreamableHttpIT {
     private void assertSuccessfulCapabilitiesResponse(final HttpResponse<String> actualResponse) {
         assertThat(actualResponse.statusCode(), is(200));
         assertTrue(getResourcePayload(actualResponse.body()).containsKey("supportedTools"));
+    }
+    
+    private record RuntimeHttpSession(HttpClient httpClient, String sessionId, String accessToken) {
     }
     
 }
