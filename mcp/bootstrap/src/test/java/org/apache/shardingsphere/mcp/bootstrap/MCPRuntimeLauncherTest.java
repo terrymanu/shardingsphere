@@ -20,7 +20,6 @@ package org.apache.shardingsphere.mcp.bootstrap;
 import org.apache.shardingsphere.mcp.bootstrap.config.HttpTransportConfiguration;
 import org.apache.shardingsphere.mcp.bootstrap.config.MCPLaunchConfiguration;
 import org.apache.shardingsphere.mcp.bootstrap.config.StdioTransportConfiguration;
-import org.apache.shardingsphere.mcp.bootstrap.fixture.MCPBootstrapTestDataFactory;
 import org.apache.shardingsphere.mcp.bootstrap.transport.server.MCPRuntimeServer;
 import org.apache.shardingsphere.mcp.bootstrap.transport.server.http.StreamableHttpMCPServer;
 import org.apache.shardingsphere.mcp.bootstrap.transport.server.stdio.StdioMCPServer;
@@ -121,7 +120,6 @@ class MCPRuntimeLauncherTest {
     
     private MCPLaunchConfiguration createLaunchConfiguration(final boolean httpEnabled) {
         return new MCPLaunchConfiguration(new HttpTransportConfiguration(httpEnabled, "127.0.0.1", false, "", 18080, "/mcp"),
-                new StdioTransportConfiguration(!httpEnabled),
-                MCPBootstrapTestDataFactory.createRuntimeDatabases("logic_db", mock(RuntimeDatabaseConfiguration.class)));
+                new StdioTransportConfiguration(!httpEnabled), Map.of("logic_db", mock(RuntimeDatabaseConfiguration.class)));
     }
 }

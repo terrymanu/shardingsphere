@@ -43,51 +43,14 @@ public final class MCPBootstrapTestDataFactory {
         return new MCPRuntimeContext(new MCPSessionManager(runtimeDatabases), new MCPDatabaseCapabilityProvider(runtimeDatabases));
     }
     
-    /**
-     * Create runtime databases.
-     *
-     * @return runtime databases
-     */
-    public static Map<String, RuntimeDatabaseConfiguration> createRuntimeDatabases() {
+    private static Map<String, RuntimeDatabaseConfiguration> createRuntimeDatabases() {
         Map<String, RuntimeDatabaseConfiguration> result = new LinkedHashMap<>(2, 1F);
         result.put("logic_db", createMockRuntimeDatabaseConfiguration("logic-db"));
         result.put("runtime_db", createMockRuntimeDatabaseConfiguration("runtime-db"));
         return result;
     }
     
-    /**
-     * Create runtime databases for one prepared runtime.
-     *
-     * @param logicalDatabase logical database
-     * @param runtimeDatabaseConfiguration runtime database configuration
-     * @return runtime databases
-     */
-    public static Map<String, RuntimeDatabaseConfiguration> createRuntimeDatabases(
-                                                                                   final String logicalDatabase, final RuntimeDatabaseConfiguration runtimeDatabaseConfiguration) {
-        return Map.of(logicalDatabase, runtimeDatabaseConfiguration);
-    }
-    
-    /**
-     * Create one runtime database configuration.
-     *
-     * @param databaseType database type
-     * @param jdbcUrl JDBC URL
-     * @param driverClassName driver class name
-     * @return runtime database configuration
-     */
-    public static RuntimeDatabaseConfiguration createRuntimeDatabaseConfiguration(
-                                                                                  final String databaseType, final String jdbcUrl, final String driverClassName) {
-        return new RuntimeDatabaseConfiguration(databaseType, jdbcUrl, "", "", driverClassName);
-    }
-    
-    /**
-     * Create one mock runtime database configuration.
-     *
-     * @param databaseName database name
-     * @return runtime database configuration
-     */
-    public static RuntimeDatabaseConfiguration createMockRuntimeDatabaseConfiguration(final String databaseName) {
-        return createRuntimeDatabaseConfiguration("H2",
-                BootstrapMockRuntimeDriver.createJdbcUrl(databaseName), BootstrapMockRuntimeDriver.class.getName());
+    private static RuntimeDatabaseConfiguration createMockRuntimeDatabaseConfiguration(final String databaseName) {
+        return new RuntimeDatabaseConfiguration("H2", BootstrapMockRuntimeDriver.createJdbcUrl(databaseName), "", "", BootstrapMockRuntimeDriver.class.getName());
     }
 }
