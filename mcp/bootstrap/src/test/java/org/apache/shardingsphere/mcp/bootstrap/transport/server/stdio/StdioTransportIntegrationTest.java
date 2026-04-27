@@ -43,8 +43,24 @@ class StdioTransportIntegrationTest {
     private Path tempDir;
     
     @Test
+    void assertBootstrapWithDefaultConfigPath() throws Exception {
+        Path configFile = createRuntimeDatabasesConfigFile("conf/mcp.yaml");
+        try (StdioTransportTestClient client = new StdioTransportTestClient(tempDir, configFile)) {
+            assertBootstrapReady(client);
+        }
+    }
+    
+    @Test
+    void assertBootstrapWithTrimmedConfigPathArgument() throws Exception {
+        Path configFile = createRuntimeDatabasesConfigFile("custom.yaml");
+        try (StdioTransportTestClient client = new StdioTransportTestClient(tempDir, configFile, "  custom.yaml  ")) {
+            assertBootstrapReady(client);
+        }
+    }
+    
+    @Test
     void assertBootstrapWithClasspathDrivenPluginDiscovery() throws Exception {
-        Path configFile = createRuntimeDatabasesConfigFile();
+        Path configFile = createRuntimeDatabasesConfigFile("mcp-runtime-databases.yaml");
         try (StdioTransportTestClient client = new StdioTransportTestClient(configFile, createClasspathWithoutOfficialFeatures())) {
             Map<String, Object> actualInitializeResult = client.initialize();
             client.notifyInitialized();
@@ -97,9 +113,20 @@ class StdioTransportIntegrationTest {
                 || actualPath.contains("/mcp/features/mask/target/");
     }
     
-    private Path createRuntimeDatabasesConfigFile() throws IOException {
+    private void assertBootstrapReady(final StdioTransportTestClient client) throws IOException {
+        Map<String, Object> actualInitializeResult = client.initialize();
+        client.notifyInitialized();
+        List<Map<String, Object>> actualTools = client.listTools();
+        assertThat(actualInitializeResult.get("protocolVersion"), is(MCPTransportConstants.PROTOCOL_VERSION));
+        assertTrue(actualTools.stream().anyMatch(each -> "search_metadata".equals(each.get("name"))));
+    }
+    
+    private Path createRuntimeDatabasesConfigFile(final String relativePath) throws IOException {
         String jdbcUrl = BootstrapMockRuntimeDriver.createJdbcUrl("stdio-transport");
-        Path result = tempDir.resolve("mcp-runtime-databases.yaml");
+        Path result = tempDir.resolve(relativePath);
+        if (null != result.getParent()) {
+            Files.createDirectories(result.getParent());
+        }
         Files.writeString(result, "transport:\n"
                 + "  http:\n"
                 + "    enabled: false\n"

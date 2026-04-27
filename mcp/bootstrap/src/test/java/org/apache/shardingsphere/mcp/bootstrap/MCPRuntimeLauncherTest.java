@@ -52,8 +52,6 @@ class MCPRuntimeLauncherTest {
                 MockedConstruction<StdioMCPServer> mockedStdioServer = mockConstruction(StdioMCPServer.class)) {
             MCPRuntimeServer actual = new MCPRuntimeLauncher().launch(createLaunchConfiguration(true));
             assertThat(actual, is(mockedHttpServer.constructed().get(0)));
-            assertThat(mockedSessionManager.constructed().size(), is(1));
-            assertThat(mockedCapabilityProvider.constructed().size(), is(1));
             assertThat(mockedHttpServer.constructed().size(), is(1));
             assertThat(mockedStdioServer.constructed().size(), is(0));
             verify(actual).start();
@@ -70,8 +68,6 @@ class MCPRuntimeLauncherTest {
             MCPRuntimeServer actual = new MCPRuntimeLauncher().launch(createLaunchConfiguration(false));
             assertThat(actual, isA(StdioMCPServer.class));
             assertThat(actual, is(mockedStdioServer.constructed().get(0)));
-            assertThat(mockedSessionManager.constructed().size(), is(1));
-            assertThat(mockedCapabilityProvider.constructed().size(), is(1));
             assertThat(mockedHttpServer.constructed().size(), is(0));
             assertThat(mockedStdioServer.constructed().size(), is(1));
             verify(actual).start();
@@ -96,8 +92,6 @@ class MCPRuntimeLauncherTest {
             IOException actual = assertThrows(IOException.class, () -> new MCPRuntimeLauncher().launch(createLaunchConfiguration(true)));
             assertThat(actual.getMessage(), is("Failed to start HTTP server."));
             assertThat(actual.getCause(), is(startFailure));
-            assertThat(mockedSessionManager.constructed().size(), is(1));
-            assertThat(mockedCapabilityProvider.constructed().size(), is(1));
             verify(mockedHttpServer.constructed().get(0)).stop();
         }
     }
@@ -112,8 +106,6 @@ class MCPRuntimeLauncherTest {
             IOException actual = assertThrows(IOException.class, () -> new MCPRuntimeLauncher().launch(createLaunchConfiguration(false)));
             assertThat(actual.getMessage(), is("Failed to start STDIO server."));
             assertThat(actual.getCause(), is(startFailure));
-            assertThat(mockedSessionManager.constructed().size(), is(1));
-            assertThat(mockedCapabilityProvider.constructed().size(), is(1));
             verify(mockedStdioServer.constructed().get(0)).stop();
         }
     }

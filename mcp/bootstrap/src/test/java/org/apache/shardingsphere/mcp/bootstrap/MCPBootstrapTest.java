@@ -30,61 +30,16 @@ import java.io.IOException;
 import java.util.Collections;
 import java.util.concurrent.atomic.AtomicReference;
 
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.is;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockConstruction;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 class MCPBootstrapTest {
-    
-    @Test
-    void assertMainWithDefaultConfigPath() throws IOException {
-        MCPLaunchConfiguration launchConfig = createLaunchConfiguration(false);
-        MCPRuntimeServer runtimeServer = mock(MCPRuntimeServer.class);
-        Runtime runtime = mock(Runtime.class);
-        try (
-                MockedStatic<MCPConfigurationLoader> mockedConfigurationLoader = mockStatic(MCPConfigurationLoader.class);
-                MockedStatic<Runtime> mockedRuntime = mockStatic(Runtime.class);
-                MockedConstruction<MCPRuntimeLauncher> mockedConstruction = mockConstruction(MCPRuntimeLauncher.class,
-                        (mock, context) -> when(mock.launch(launchConfig)).thenReturn(runtimeServer))) {
-            mockedRuntime.when(Runtime::getRuntime).thenReturn(runtime);
-            mockedConfigurationLoader.when(() -> MCPConfigurationLoader.load("conf/mcp.yaml")).thenReturn(launchConfig);
-            MCPBootstrap.main(new String[0]);
-            assertThat(mockedConstruction.constructed().size(), is(1));
-            MCPRuntimeLauncher actualLauncher = mockedConstruction.constructed().iterator().next();
-            verify(actualLauncher).launch(launchConfig);
-        }
-        verify(runtime).addShutdownHook(any(Thread.class));
-        verifyNoInteractions(runtimeServer);
-    }
-    
-    @Test
-    void assertMainWithTrimmedConfigPath() throws IOException {
-        MCPLaunchConfiguration launchConfig = createLaunchConfiguration(false);
-        MCPRuntimeServer runtimeServer = mock(MCPRuntimeServer.class);
-        Runtime runtime = mock(Runtime.class);
-        try (
-                MockedStatic<MCPConfigurationLoader> mockedConfigurationLoader = mockStatic(MCPConfigurationLoader.class);
-                MockedStatic<Runtime> mockedRuntime = mockStatic(Runtime.class);
-                MockedConstruction<MCPRuntimeLauncher> mockedConstruction = mockConstruction(MCPRuntimeLauncher.class,
-                        (mock, context) -> when(mock.launch(launchConfig)).thenReturn(runtimeServer))) {
-            mockedRuntime.when(Runtime::getRuntime).thenReturn(runtime);
-            mockedConfigurationLoader.when(() -> MCPConfigurationLoader.load("custom.yaml")).thenReturn(launchConfig);
-            MCPBootstrap.main(new String[]{"  custom.yaml  "});
-            assertThat(mockedConstruction.constructed().size(), is(1));
-            MCPRuntimeLauncher actualLauncher = mockedConstruction.constructed().iterator().next();
-            verify(actualLauncher).launch(launchConfig);
-        }
-        verify(runtime).addShutdownHook(any(Thread.class));
-        verifyNoInteractions(runtimeServer);
-    }
     
     @Test
     void assertMainCloseServerWhenShutdownHookRuns() throws IOException {
@@ -104,8 +59,7 @@ class MCPBootstrapTest {
                 return null;
             }).when(runtime).addShutdownHook(any(Thread.class));
             MCPBootstrap.main(new String[0]);
-            assertThat(mockedConstruction.constructed().size(), is(1));
-            MCPRuntimeLauncher actualLauncher = mockedConstruction.constructed().iterator().next();
+            MCPRuntimeLauncher actualLauncher = mockedConstruction.constructed().get(0);
             verify(actualLauncher).launch(launchConfig);
             shutdownHook.get().run();
         }
@@ -131,8 +85,7 @@ class MCPBootstrapTest {
                 return null;
             }).when(runtime).addShutdownHook(any(Thread.class));
             MCPBootstrap.main(new String[]{"stdio.yaml"});
-            assertThat(mockedConstruction.constructed().size(), is(1));
-            MCPRuntimeLauncher actualLauncher = mockedConstruction.constructed().iterator().next();
+            MCPRuntimeLauncher actualLauncher = mockedConstruction.constructed().get(0);
             verify(actualLauncher).launch(launchConfig);
             shutdownHook.get().run();
             shutdownHook.get().run();

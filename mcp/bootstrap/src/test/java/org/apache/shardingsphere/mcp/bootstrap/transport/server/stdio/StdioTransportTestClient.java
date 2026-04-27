@@ -31,6 +31,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -58,12 +59,20 @@ final class StdioTransportTestClient implements AutoCloseable {
     
     private boolean closed;
     
-    StdioTransportTestClient(final Path configFile) throws IOException {
-        this(configFile, System.getProperty("java.class.path"));
+    StdioTransportTestClient(final Path configFile, final String classpath) throws IOException {
+        this(Paths.get("").toAbsolutePath(), configFile, configFile.toString(), classpath);
     }
     
-    StdioTransportTestClient(final Path configFile, final String classpath) throws IOException {
-        process = createProcessBuilder(configFile, createLogbackConfigurationFile(configFile), classpath).start();
+    StdioTransportTestClient(final Path workingDirectory, final Path configFile) throws IOException {
+        this(workingDirectory, configFile, null, System.getProperty("java.class.path"));
+    }
+    
+    StdioTransportTestClient(final Path workingDirectory, final Path configFile, final String configPathArgument) throws IOException {
+        this(workingDirectory, configFile, configPathArgument, System.getProperty("java.class.path"));
+    }
+    
+    private StdioTransportTestClient(final Path workingDirectory, final Path configFile, final String configPathArgument, final String classpath) throws IOException {
+        process = createProcessBuilder(workingDirectory, configPathArgument, createLogbackConfigurationFile(configFile), classpath).start();
         stdErrorCollector = startStdErrorCollector(process, stdErrorMessages);
         writer = new BufferedWriter(new OutputStreamWriter(process.getOutputStream(), StandardCharsets.UTF_8));
         reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
@@ -100,12 +109,12 @@ final class StdioTransportTestClient implements AutoCloseable {
         });
     }
     
-    Map<String, Object> request(final String requestId, final String method, final Map<String, Object> params) throws IOException {
+    private Map<String, Object> request(final String requestId, final String method, final Map<String, Object> params) throws IOException {
         writeMessage(Map.of("jsonrpc", "2.0", "id", requestId, "method", method, "params", params));
         return getResult(readResponse(requestId));
     }
     
-    void notifyServer(final String method, final Map<String, Object> params) throws IOException {
+    private void notifyServer(final String method, final Map<String, Object> params) throws IOException {
         writeMessage(Map.of("jsonrpc", "2.0", "method", method, "params", params));
     }
     
@@ -115,7 +124,7 @@ final class StdioTransportTestClient implements AutoCloseable {
         writer.flush();
     }
     
-    String getStdErrorOutput() {
+    private String getStdErrorOutput() {
         return String.join(System.lineSeparator(), stdErrorMessages);
     }
     
@@ -137,9 +146,15 @@ final class StdioTransportTestClient implements AutoCloseable {
         }
     }
     
-    private ProcessBuilder createProcessBuilder(final Path configFile, final Path logbackConfigFile, final String classpath) {
-        return new ProcessBuilder(Paths.get(System.getProperty("java.home"), "bin", "java").toString(),
-                "-Dlogback.configurationFile=" + logbackConfigFile, "-cp", classpath, MCPBootstrap.class.getName(), configFile.toString());
+    private ProcessBuilder createProcessBuilder(final Path workingDirectory, final String configPathArgument, final Path logbackConfigFile, final String classpath) {
+        List<String> command = new LinkedList<>(List.of(Paths.get(System.getProperty("java.home"), "bin", "java").toString(),
+                "-Dlogback.configurationFile=" + logbackConfigFile, "-cp", classpath, MCPBootstrap.class.getName()));
+        if (null != configPathArgument) {
+            command.add(configPathArgument);
+        }
+        ProcessBuilder result = new ProcessBuilder(command);
+        result.directory(workingDirectory.toFile());
+        return result;
     }
     
     private Path createLogbackConfigurationFile(final Path configFile) throws IOException {
