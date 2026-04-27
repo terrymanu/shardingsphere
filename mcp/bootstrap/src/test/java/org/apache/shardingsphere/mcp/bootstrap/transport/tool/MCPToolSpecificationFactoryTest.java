@@ -23,17 +23,14 @@ import io.modelcontextprotocol.spec.McpSchema;
 import io.modelcontextprotocol.spec.McpSchema.TextContent;
 import org.apache.shardingsphere.infra.util.json.JsonUtils;
 import org.apache.shardingsphere.mcp.bootstrap.fixture.MCPBootstrapTestDataFactory;
-import org.apache.shardingsphere.mcp.capability.database.MCPDatabaseCapabilityProvider;
-import org.apache.shardingsphere.mcp.context.MCPRuntimeContext;
-import org.apache.shardingsphere.mcp.metadata.jdbc.RuntimeDatabaseConfiguration;
-import org.apache.shardingsphere.mcp.session.MCPSessionManager;
+import org.apache.shardingsphere.mcp.protocol.response.MCPResponse;
+import org.apache.shardingsphere.mcp.tool.MCPToolController;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.mockito.internal.configuration.plugins.Plugins;
 
-import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -47,6 +44,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class MCPToolSpecificationFactoryTest {
@@ -89,27 +87,26 @@ class MCPToolSpecificationFactoryTest {
     @ParameterizedTest(name = "{0}")
     @MethodSource("assertCreateToolSpecificationsWithCallHandlerArguments")
     @SuppressWarnings("unchecked")
-    void assertCreateToolSpecificationsWithCallHandler(final String name, final String toolName, final Map<String, Object> arguments, final boolean expectedIsError,
-                                                       final String expectedPayloadKey, final Object expectedPayloadValue, final boolean expectedHasMessage, final String expectedMessage) {
-        MCPToolSpecificationFactory factory = createFactory();
-        List<SyncToolSpecification> actual = factory.createToolSpecifications();
-        SyncToolSpecification actualSpecification = actual.stream().anyMatch(each -> toolName.equals(each.tool().name()))
-                ? findToolSpecification(actual, toolName)
-                : findToolSpecification(actual, "execute_query");
+    void assertCreateToolSpecificationsWithCallHandler(final String name, final String toolName, final Map<String, Object> requestArguments,
+                                                       final Map<String, Object> actualArguments, final Map<String, Object> payload) {
+        MCPToolController toolController = mock(MCPToolController.class);
+        MCPResponse response = mock(MCPResponse.class);
+        when(response.toPayload()).thenReturn(payload);
+        when(toolController.handle("session-1", toolName, actualArguments)).thenReturn(response);
+        MCPToolSpecificationFactory factory = createFactory(toolController);
+        SyncToolSpecification actualSpecification = findToolSpecification(factory.createToolSpecifications(), toolName);
         McpSyncServerExchange exchange = mock(McpSyncServerExchange.class);
         when(exchange.sessionId()).thenReturn("session-1");
-        McpSchema.CallToolResult actualResult = actualSpecification.callHandler().apply(exchange, new McpSchema.CallToolRequest(toolName, arguments));
-        assertThat(actualResult.isError(), is(expectedIsError));
+        McpSchema.CallToolResult actualResult = actualSpecification.callHandler().apply(exchange, new McpSchema.CallToolRequest(toolName, requestArguments));
+        assertThat(actualResult.isError(), is(payload.containsKey("error_code")));
         assertThat(actualResult.structuredContent(), isA(Map.class));
         Map<String, Object> actualPayload = (Map<String, Object>) actualResult.structuredContent();
-        Object actualMessage = actualPayload.getOrDefault("message", "");
-        assertThat(actualPayload.get(expectedPayloadKey), is(expectedPayloadValue));
-        assertThat(actualPayload.containsKey("message"), is(expectedHasMessage));
-        assertThat(actualMessage, is(expectedMessage));
+        assertThat(actualPayload, is(payload));
         assertThat(actualResult.content().size(), is(1));
         assertThat(actualResult.content().get(0), isA(TextContent.class));
         TextContent actualContent = (TextContent) actualResult.content().get(0);
-        assertThat(actualContent.text(), is(JsonUtils.toJsonString(actualPayload)));
+        assertThat(actualContent.text(), is(JsonUtils.toJsonString(payload)));
+        verify(toolController).handle("session-1", toolName, actualArguments);
     }
     
     private SyncToolSpecification findToolSpecification(final List<SyncToolSpecification> specifications, final String toolName) {
@@ -117,10 +114,17 @@ class MCPToolSpecificationFactoryTest {
     }
     
     private MCPToolSpecificationFactory createFactory() {
-        Map<String, RuntimeDatabaseConfiguration> runtimeDatabases = new LinkedHashMap<>(MCPBootstrapTestDataFactory.createRuntimeDatabases());
-        MCPSessionManager sessionManager = new MCPSessionManager(runtimeDatabases);
-        sessionManager.createSession("session-1");
-        return new MCPToolSpecificationFactory(new MCPRuntimeContext(sessionManager, new MCPDatabaseCapabilityProvider(runtimeDatabases)));
+        return new MCPToolSpecificationFactory(MCPBootstrapTestDataFactory.createRuntimeContext());
+    }
+    
+    private MCPToolSpecificationFactory createFactory(final MCPToolController toolController) {
+        MCPToolSpecificationFactory result = createFactory();
+        try {
+            Plugins.getMemberAccessor().set(MCPToolSpecificationFactory.class.getDeclaredField("toolController"), result, toolController);
+        } catch (final ReflectiveOperationException ex) {
+            throw new IllegalStateException(ex);
+        }
+        return result;
     }
     
     private static Stream<Arguments> assertCreateToolSpecificationsArguments() {
@@ -140,9 +144,10 @@ class MCPToolSpecificationFactoryTest {
     
     private static Stream<Arguments> assertCreateToolSpecificationsWithCallHandlerArguments() {
         return Stream.of(
-                Arguments.of("execute query call", "execute_query", Map.of("database", "logic_db", "sql", "SELECT 1"), false, "result_kind", "result_set", false, ""),
-                Arguments.of("search metadata with null arguments", "search_metadata", null, true, "error_code", "invalid_request", true, "query is required."),
-                Arguments.of("unsupported tool call", "unsupported_tool", Collections.emptyMap(), true, "error_code", "invalid_request", true, "Unsupported tool."));
+                Arguments.of("execute query forwards arguments", "execute_query", Map.of("sql", "SELECT 1"), Map.of("sql", "SELECT 1"), Map.of("result_kind", "result_set")),
+                Arguments.of("null arguments become empty map", "search_metadata", null, Map.of(), Map.of("items", List.of())),
+                Arguments.of("error payload marks tool error", "search_metadata", Map.of("query", "order"), Map.of("query", "order"),
+                        Map.of("error_code", "invalid_request", "message", "query is required.")));
     }
     
     private static Stream<Arguments> assertCreateToolSpecificationsWithoutRemovedFieldsArguments() {

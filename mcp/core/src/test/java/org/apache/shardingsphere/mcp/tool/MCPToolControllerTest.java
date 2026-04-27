@@ -17,74 +17,62 @@
 
 package org.apache.shardingsphere.mcp.tool;
 
-import org.apache.shardingsphere.mcp.context.MCPRuntimeContext;
-import org.apache.shardingsphere.mcp.capability.SupportedMCPMetadataObjectType;
+import org.apache.shardingsphere.mcp.context.MCPFeatureContext;
+import org.apache.shardingsphere.mcp.protocol.exception.MCPUnsupportedException;
+import org.apache.shardingsphere.mcp.protocol.response.MCPResponse;
 import org.apache.shardingsphere.mcp.resource.ResourceTestDataFactory;
-import org.apache.shardingsphere.mcp.tool.response.MetadataSearchHit;
+import org.apache.shardingsphere.mcp.tool.handler.ToolHandlerRegistry;
 import org.junit.jupiter.api.Test;
+import org.mockito.MockedStatic;
 
-import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.when;
 
 class MCPToolControllerTest {
     
     @Test
+    void assertHandle() {
+        MCPResponse response = mock(MCPResponse.class);
+        Map<String, Object> payload = Map.of("items", 1);
+        when(response.toPayload()).thenReturn(payload);
+        try (MockedStatic<ToolHandlerRegistry> mocked = mockStatic(ToolHandlerRegistry.class)) {
+            mocked.when(() -> ToolHandlerRegistry.dispatch(any(MCPFeatureContext.class), eq("session-1"), eq("search_metadata"), eq(Map.of("query", "order"))))
+                    .thenReturn(Optional.of(response));
+            Map<String, Object> actual = createController().handle("session-1", "search_metadata", Map.of("query", "order")).toPayload();
+            assertThat(actual, is(payload));
+        }
+    }
+    
+    @Test
     void assertHandleWithUnsupportedTool() {
-        Map<String, Object> actual = createSearchController().handle("session-1", "unsupported_tool", Map.of()).toPayload();
-        assertThat(actual.get("error_code"), is("invalid_request"));
-        assertThat(actual.get("message"), is("Unsupported tool."));
+        try (MockedStatic<ToolHandlerRegistry> mocked = mockStatic(ToolHandlerRegistry.class)) {
+            mocked.when(() -> ToolHandlerRegistry.dispatch(any(MCPFeatureContext.class), eq("session-1"), eq("unsupported_tool"), eq(Map.of()))).thenReturn(Optional.empty());
+            Map<String, Object> actual = createController().handle("session-1", "unsupported_tool", Map.of()).toPayload();
+            assertThat(actual.get("error_code"), is("invalid_request"));
+            assertThat(actual.get("message"), is("Unsupported tool."));
+        }
     }
     
     @Test
-    void assertHandleSearchMetadata() {
-        Map<String, Object> actual = createSearchController().handle("session-1", "search_metadata", Map.of("query", "order", "object_types", List.of("index"))).toPayload();
-        assertThat(((List<?>) actual.get("items")).size(), is(1));
-        assertThat(((MetadataSearchHit) ((List<?>) actual.get("items")).get(0)).getName(), is("order_idx"));
+    void assertHandleWithHandlerException() {
+        try (MockedStatic<ToolHandlerRegistry> mocked = mockStatic(ToolHandlerRegistry.class)) {
+            mocked.when(() -> ToolHandlerRegistry.dispatch(any(MCPFeatureContext.class), eq("session-1"), eq("search_metadata"), eq(Map.of("query", "order"))))
+                    .thenThrow(new MCPUnsupportedException("Search is not supported."));
+            Map<String, Object> actual = createController().handle("session-1", "search_metadata", Map.of("query", "order")).toPayload();
+            assertThat(actual.get("error_code"), is("unsupported"));
+            assertThat(actual.get("message"), is("Search is not supported."));
+        }
     }
     
-    @Test
-    void assertHandleSearchMetadataWithSequence() {
-        Map<String, Object> actual = createSearchController().handle("session-1", "search_metadata",
-                Map.of("database", "runtime_db", "query", "order", "object_types", List.of("sequence"))).toPayload();
-        assertThat(((List<?>) actual.get("items")).size(), is(1));
-        assertThat(((MetadataSearchHit) ((List<?>) actual.get("items")).get(0)).getName(), is("order_seq"));
-    }
-    
-    @Test
-    void assertHandleWithInvalidRequest() {
-        Map<String, Object> actual = createSearchController().handle("session-1", "search_metadata", Map.of("schema", "public", "query", "orders")).toPayload();
-        assertThat(actual.get("error_code"), is("invalid_request"));
-        assertThat(actual.get("message"), is("Schema cannot be provided without database."));
-    }
-    
-    @Test
-    void assertHandleWithMissingQuery() {
-        Map<String, Object> actual =
-                createSearchController().handle("session-1", "search_metadata", Map.of("database", "logic_db", "object_types", List.of(SupportedMCPMetadataObjectType.TABLE.name()))).toPayload();
-        assertThat(actual.get("error_code"), is("invalid_request"));
-        assertThat(actual.get("message"), is("query is required."));
-    }
-    
-    @Test
-    void assertHandleWithBlankQuery() {
-        Map<String, Object> actual = createSearchController().handle("session-1", "search_metadata", Map.of("query", "   ")).toPayload();
-        assertThat(actual.get("error_code"), is("invalid_request"));
-        assertThat(actual.get("message"), is("query is required."));
-    }
-    
-    @Test
-    void assertHandleWithInvalidObjectTypes() {
-        Map<String, Object> actual = createSearchController().handle("session-1", "search_metadata", Map.of("query", "order", "object_types", List.of("invalid_type"))).toPayload();
-        assertThat(actual.get("error_code"), is("invalid_request"));
-        assertThat(actual.get("message"), is("Unsupported object_types value `invalid_type`."));
-    }
-    
-    private MCPToolController createSearchController() {
-        MCPRuntimeContext runtimeContext = ResourceTestDataFactory.createRuntimeContext();
-        runtimeContext.getSessionManager().createSession("session-1");
-        return new MCPToolController(runtimeContext);
+    private MCPToolController createController() {
+        return new MCPToolController(ResourceTestDataFactory.createRuntimeContext());
     }
 }

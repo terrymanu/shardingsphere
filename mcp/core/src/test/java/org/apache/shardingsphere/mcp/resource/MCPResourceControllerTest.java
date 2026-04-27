@@ -17,80 +17,57 @@
 
 package org.apache.shardingsphere.mcp.resource;
 
-import org.apache.shardingsphere.mcp.capability.SupportedMCPStatement;
-import org.apache.shardingsphere.mcp.metadata.model.MCPSequenceMetadata;
-import org.apache.shardingsphere.mcp.metadata.model.MCPTableMetadata;
+import org.apache.shardingsphere.mcp.context.MCPFeatureContext;
+import org.apache.shardingsphere.mcp.protocol.exception.MCPUnsupportedException;
+import org.apache.shardingsphere.mcp.protocol.response.MCPResponse;
+import org.apache.shardingsphere.mcp.resource.handler.ResourceHandlerRegistry;
 import org.junit.jupiter.api.Test;
+import org.mockito.MockedStatic;
 
-import java.util.List;
 import java.util.Map;
-import java.util.Set;
+import java.util.Optional;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.when;
 
 class MCPResourceControllerTest {
     
     @Test
+    void assertHandle() {
+        MCPResponse response = mock(MCPResponse.class);
+        Map<String, Object> payload = Map.of("resource", "capabilities");
+        when(response.toPayload()).thenReturn(payload);
+        try (MockedStatic<ResourceHandlerRegistry> mocked = mockStatic(ResourceHandlerRegistry.class)) {
+            mocked.when(() -> ResourceHandlerRegistry.dispatch(any(MCPFeatureContext.class), eq("shardingsphere://capabilities"))).thenReturn(Optional.of(response));
+            Map<String, Object> actual = createController().handle("shardingsphere://capabilities").toPayload();
+            assertThat(actual, is(payload));
+        }
+    }
+    
+    @Test
     void assertHandleWithUnsupportedResourceUri() {
-        Map<String, Object> actual = createController().handle("unsupported://resource").toPayload();
-        assertThat(actual.get("error_code"), is("invalid_request"));
-        assertThat(actual.get("message"), is("Unsupported resource URI."));
+        try (MockedStatic<ResourceHandlerRegistry> mocked = mockStatic(ResourceHandlerRegistry.class)) {
+            mocked.when(() -> ResourceHandlerRegistry.dispatch(any(MCPFeatureContext.class), eq("unsupported://resource"))).thenReturn(Optional.empty());
+            Map<String, Object> actual = createController().handle("unsupported://resource").toPayload();
+            assertThat(actual.get("error_code"), is("invalid_request"));
+            assertThat(actual.get("message"), is("Unsupported resource URI."));
+        }
     }
     
     @Test
-    void assertHandleServiceCapabilities() {
-        Map<String, Object> actual = createController().handle("shardingsphere://capabilities").toPayload();
-        assertTrue(((List<?>) actual.get("supportedResources")).contains("shardingsphere://databases/{database}/capabilities"));
-        assertTrue(((List<?>) actual.get("supportedResources")).contains("shardingsphere://databases/{database}/schemas/{schema}/tables/{table}/columns"));
-        assertTrue(((List<?>) actual.get("supportedResources")).contains("shardingsphere://databases/{database}/schemas/{schema}/views/{view}/columns/{column}"));
-        assertTrue(((List<?>) actual.get("supportedTools")).contains("search_metadata"));
-        assertTrue(((List<?>) actual.get("supportedTools")).contains("execute_query"));
-        assertTrue(((Set<?>) actual.get("supportedStatementClasses")).contains(SupportedMCPStatement.QUERY));
-    }
-    
-    @Test
-    void assertHandleDatabaseCapabilities() {
-        Map<String, Object> actual = createController().handle("shardingsphere://databases/logic_db/capabilities").toPayload();
-        assertThat(actual.get("database"), is("logic_db"));
-        assertThat(actual.get("databaseType"), is("MySQL"));
-        assertTrue((Boolean) actual.get("supportsTransactionControl"));
-    }
-    
-    @Test
-    void assertHandleWithUnknownDatabaseCapabilities() {
-        Map<String, Object> actual = createController().handle("shardingsphere://databases/missing_db/capabilities").toPayload();
-        assertThat(actual.get("error_code"), is("not_found"));
-        assertThat(actual.get("message"), is("Database capability does not exist."));
-    }
-    
-    @Test
-    void assertHandleMetadataItems() {
-        Map<String, Object> actual = createController().handle("shardingsphere://databases/logic_db/schemas/public/tables").toPayload();
-        assertThat(((List<?>) actual.get("items")).size(), is(2));
-        assertThat(((MCPTableMetadata) ((List<?>) actual.get("items")).get(0)).getTable(), is("order_items"));
-    }
-    
-    @Test
-    void assertHandleSequenceMetadataItems() {
-        Map<String, Object> actual = createController().handle("shardingsphere://databases/runtime_db/schemas/public/sequences").toPayload();
-        assertThat(((List<?>) actual.get("items")).size(), is(1));
-        assertThat(((MCPSequenceMetadata) ((List<?>) actual.get("items")).get(0)).getSequence(), is("order_seq"));
-    }
-    
-    @Test
-    void assertHandleWithUnsupportedIndexResource() {
-        Map<String, Object> actual = createController().handle("shardingsphere://databases/warehouse/schemas/warehouse/tables/facts/indexes").toPayload();
-        assertThat(actual.get("error_code"), is("unsupported"));
-        assertThat(actual.get("message"), is("Index resources are not supported for the current database."));
-    }
-    
-    @Test
-    void assertHandleWithUnsupportedSequenceResource() {
-        Map<String, Object> actual = createController().handle("shardingsphere://databases/warehouse/schemas/warehouse/sequences").toPayload();
-        assertThat(actual.get("error_code"), is("unsupported"));
-        assertThat(actual.get("message"), is("Sequence resources are not supported for the current database."));
+    void assertHandleWithHandlerException() {
+        try (MockedStatic<ResourceHandlerRegistry> mocked = mockStatic(ResourceHandlerRegistry.class)) {
+            mocked.when(() -> ResourceHandlerRegistry.dispatch(any(MCPFeatureContext.class), eq("shardingsphere://indexes")))
+                    .thenThrow(new MCPUnsupportedException("Index resources are not supported."));
+            Map<String, Object> actual = createController().handle("shardingsphere://indexes").toPayload();
+            assertThat(actual.get("error_code"), is("unsupported"));
+            assertThat(actual.get("message"), is("Index resources are not supported."));
+        }
     }
     
     private MCPResourceController createController() {

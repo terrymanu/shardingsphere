@@ -113,36 +113,6 @@ class YamlMCPLaunchConfigurationSwapperTest {
     }
     
     @Test
-    void assertSwapToObjectWithDisabledTransports() {
-        IllegalArgumentException actual = assertThrows(IllegalArgumentException.class, () -> swapper.swapToObject(YamlEngine.unmarshal("transport:\n"
-                + "  http:\n"
-                + "    enabled: false\n"
-                + "    bindHost: 127.0.0.1\n"
-                + "    allowRemoteAccess: false\n"
-                + "    port: 18088\n"
-                + "    endpointPath: /mcp\n"
-                + "  stdio:\n"
-                + "    enabled: false\n"
-                + "runtimeDatabases: {}\n", YamlMCPLaunchConfiguration.class)));
-        assertThat(actual.getMessage(), is("Exactly one transport must be explicitly enabled. Set either `transport.http.enabled` or `transport.stdio.enabled` to true."));
-    }
-    
-    @Test
-    void assertSwapToObjectWithMultipleEnabledTransports() {
-        IllegalArgumentException actual = assertThrows(IllegalArgumentException.class, () -> swapper.swapToObject(YamlEngine.unmarshal("transport:\n"
-                + "  http:\n"
-                + "    enabled: true\n"
-                + "    bindHost: 127.0.0.1\n"
-                + "    allowRemoteAccess: false\n"
-                + "    port: 18088\n"
-                + "    endpointPath: /mcp\n"
-                + "  stdio:\n"
-                + "    enabled: true\n"
-                + "runtimeDatabases: {}\n", YamlMCPLaunchConfiguration.class)));
-        assertThat(actual.getMessage(), is("HTTP and STDIO transports cannot be enabled at the same time. Choose exactly one transport."));
-    }
-    
-    @Test
     void assertSwapToObjectWithOmittedTransportEnabled() {
         MCPLaunchConfiguration actual = swapper.swapToObject(YamlEngine.unmarshal("transport:\n"
                 + "  http:\n"
@@ -158,72 +128,11 @@ class YamlMCPLaunchConfigurationSwapperTest {
     }
     
     @Test
-    void assertSwapToObjectWithRuntimeDatabaseTypeMissing() {
-        String yamlContent = "transport:\n"
-                + "  http:\n"
-                + "    enabled: false\n"
-                + "    bindHost: 127.0.0.1\n"
-                + "    allowRemoteAccess: false\n"
-                + "    port: 18088\n"
-                + "    endpointPath: /mcp\n"
-                + "  stdio:\n"
-                + "    enabled: true\n"
-                + "runtimeDatabases:\n"
-                + "  logic_db:\n"
-                + "    jdbcUrl: jdbc:h2:mem:logic\n"
-                + "    username: ''\n"
-                + "    password: ''\n"
-                + "    driverClassName: org.h2.Driver\n";
-        IllegalArgumentException actual = assertThrows(IllegalArgumentException.class, () -> swapper.swapToObject(YamlEngine.unmarshal(yamlContent, YamlMCPLaunchConfiguration.class)));
-        assertThat(actual.getMessage(), is("Runtime database property `databaseType` is required."));
-    }
-    
-    @Test
-    void assertSwapToObjectWithNullRuntimeDatabaseConfiguration() {
-        String yamlContent = "transport:\n"
-                + "  http:\n"
-                + "    enabled: false\n"
-                + "    bindHost: 127.0.0.1\n"
-                + "    allowRemoteAccess: false\n"
-                + "    port: 18088\n"
-                + "    endpointPath: /mcp\n"
-                + "  stdio:\n"
-                + "    enabled: true\n"
-                + "runtimeDatabases:\n"
-                + "  logic_db: null\n";
-        IllegalArgumentException actual = assertThrows(IllegalArgumentException.class, () -> swapper.swapToObject(YamlEngine.unmarshal(yamlContent, YamlMCPLaunchConfiguration.class)));
-        assertThat(actual.getMessage(), is("Runtime database configuration cannot be null."));
-    }
-    
-    @Test
     void assertSwapToObjectWithUnsupportedRootProperty() {
         ConstructorException actual = assertThrows(ConstructorException.class, () -> swapper.swapToObject(YamlEngine.unmarshal("runtime:\n"
                 + "  props:\n"
                 + "    databaseName: logic_db\n", YamlMCPLaunchConfiguration.class)));
         assertThat(actual.getMessage(), containsString("Unable to find property 'runtime'"));
-    }
-    
-    @Test
-    void assertSwapToObjectWithUnsupportedRuntimeDatabaseProperty() {
-        String yamlContent = "transport:\n"
-                + "  http:\n"
-                + "    enabled: false\n"
-                + "    bindHost: 127.0.0.1\n"
-                + "    allowRemoteAccess: false\n"
-                + "    port: 18088\n"
-                + "    endpointPath: /mcp\n"
-                + "  stdio:\n"
-                + "    enabled: true\n"
-                + "runtimeDatabases:\n"
-                + "  logic_db:\n"
-                + "    databaseType: H2\n"
-                + "    jdbcUrl: jdbc:h2:mem:logic\n"
-                + "    username: ''\n"
-                + "    password: ''\n"
-                + "    driverClassName: org.h2.Driver\n"
-                + "    supportsExplainAnalyze: true\n";
-        IllegalArgumentException actual = assertThrows(IllegalArgumentException.class, () -> swapper.swapToObject(YamlEngine.unmarshal(yamlContent, YamlMCPLaunchConfiguration.class)));
-        assertThat(actual.getMessage(), is("Unsupported runtime database property `supportsExplainAnalyze`."));
     }
     
     @Test

@@ -25,10 +25,13 @@ import io.modelcontextprotocol.spec.McpSchema;
 import io.modelcontextprotocol.spec.McpSchema.TextResourceContents;
 import org.apache.shardingsphere.infra.util.json.JsonUtils;
 import org.apache.shardingsphere.mcp.bootstrap.fixture.MCPBootstrapTestDataFactory;
+import org.apache.shardingsphere.mcp.protocol.response.MCPResponse;
+import org.apache.shardingsphere.mcp.resource.MCPResourceController;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.mockito.internal.configuration.plugins.Plugins;
 
 import java.util.List;
 import java.util.Map;
@@ -40,6 +43,8 @@ import static org.hamcrest.Matchers.isA;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class MCPResourceSpecificationFactoryTest {
     
@@ -58,21 +63,6 @@ class MCPResourceSpecificationFactoryTest {
         assertThat(actualSpecification.resource().description(), is("ShardingSphere MCP resource: shardingsphere://capabilities"));
         assertThat(actualSpecification.resource().mimeType(), is("application/json"));
         assertNotNull(actualSpecification.readHandler());
-        McpSchema.ReadResourceResult actualResult = actualSpecification.readHandler().apply(mock(McpSyncServerExchange.class), new McpSchema.ReadResourceRequest("shardingsphere://capabilities"));
-        assertThat(actualResult.contents().size(), is(1));
-        assertThat(actualResult.contents().get(0), isA(TextResourceContents.class));
-        TextResourceContents actualContent = (TextResourceContents) actualResult.contents().get(0);
-        Map<String, Object> actualPayload = JsonUtils.fromJsonString(actualContent.text(), new TypeReference<>() {
-        });
-        List<?> actualSupportedResources = (List<?>) actualPayload.get("supportedResources");
-        assertTrue(actualSupportedResources.contains("shardingsphere://databases/{database}/schemas/{schema}/views/{view}/columns/{column}"));
-        assertTrue(actualSupportedResources.contains("shardingsphere://features/encrypt/databases/{database}/rules"));
-        assertTrue(actualSupportedResources.contains("shardingsphere://features/mask/databases/{database}/tables/{table}/rules"));
-        List<?> actualSupportedTools = (List<?>) actualPayload.get("supportedTools");
-        assertTrue(actualSupportedTools.contains("search_metadata"));
-        assertTrue(actualSupportedTools.contains("plan_encrypt_rule"));
-        assertTrue(actualSupportedTools.contains("plan_mask_rule"));
-        assertTrue(((List<?>) actualPayload.get("supportedStatementClasses")).contains("QUERY"));
     }
     
     @Test
@@ -89,8 +79,7 @@ class MCPResourceSpecificationFactoryTest {
     
     @ParameterizedTest(name = "{0}")
     @MethodSource("assertCreateResourceTemplateSpecificationsArguments")
-    void assertCreateResourceTemplateSpecifications(final String name, final String uriTemplate, final String actualUri, final String expectedName,
-                                                    final String expectedItemKey, final String expectedItemValue) {
+    void assertCreateResourceTemplateSpecifications(final String name, final String uriTemplate, final String expectedName) {
         MCPResourceSpecificationFactory factory = createFactory();
         List<SyncResourceTemplateSpecification> actual = factory.createResourceTemplateSpecifications();
         assertTrue(actual.stream().allMatch(each -> each.resourceTemplate().uriTemplate().contains("{")));
@@ -99,22 +88,52 @@ class MCPResourceSpecificationFactoryTest {
         assertThat(actualSpecification.resourceTemplate().description(), is("ShardingSphere MCP resource template: " + uriTemplate));
         assertThat(actualSpecification.resourceTemplate().mimeType(), is("application/json"));
         assertNotNull(actualSpecification.readHandler());
-        McpSchema.ReadResourceResult actualResult = actualSpecification.readHandler().apply(mock(McpSyncServerExchange.class), new McpSchema.ReadResourceRequest(actualUri));
+    }
+    
+    @Test
+    void assertCreateResourceSpecificationsWithReadHandler() {
+        MCPResponse response = mock(MCPResponse.class);
+        Map<String, Object> payload = Map.of("supportedResources", List.of("shardingsphere://capabilities"));
+        when(response.toPayload()).thenReturn(payload);
+        MCPResourceController controller = mock(MCPResourceController.class);
+        when(controller.handle("shardingsphere://capabilities")).thenReturn(response);
+        MCPResourceSpecificationFactory factory = createFactory(controller);
+        SyncResourceSpecification actualSpecification = findResourceSpecification(factory.createResourceSpecifications(), "shardingsphere://capabilities");
+        McpSchema.ReadResourceResult actualResult = actualSpecification.readHandler().apply(mock(McpSyncServerExchange.class), new McpSchema.ReadResourceRequest("shardingsphere://capabilities"));
         assertThat(actualResult.contents().size(), is(1));
         assertThat(actualResult.contents().get(0), isA(TextResourceContents.class));
         TextResourceContents actualContent = (TextResourceContents) actualResult.contents().get(0);
         Map<String, Object> actualPayload = JsonUtils.fromJsonString(actualContent.text(), new TypeReference<>() {
         });
-        assertThat(((List<?>) actualPayload.get("items")).size(), is(1));
-        assertThat(((Map<?, ?>) ((List<?>) actualPayload.get("items")).get(0)).get(expectedItemKey), is(expectedItemValue));
+        assertThat(actualPayload, is(payload));
+        verify(controller).handle("shardingsphere://capabilities");
+    }
+    
+    @Test
+    void assertCreateResourceTemplateSpecificationsWithReadHandler() {
+        MCPResponse response = mock(MCPResponse.class);
+        Map<String, Object> payload = Map.of("items", List.of(Map.of("database", "logic_db")));
+        when(response.toPayload()).thenReturn(payload);
+        MCPResourceController controller = mock(MCPResourceController.class);
+        when(controller.handle("shardingsphere://databases/logic_db")).thenReturn(response);
+        MCPResourceSpecificationFactory factory = createFactory(controller);
+        SyncResourceTemplateSpecification actualSpecification = findResourceTemplateSpecification(factory.createResourceTemplateSpecifications(), "shardingsphere://databases/{database}");
+        McpSchema.ReadResourceResult actualResult =
+                actualSpecification.readHandler().apply(mock(McpSyncServerExchange.class), new McpSchema.ReadResourceRequest("shardingsphere://databases/logic_db"));
+        assertThat(actualResult.contents().size(), is(1));
+        assertThat(actualResult.contents().get(0), isA(TextResourceContents.class));
+        TextResourceContents actualContent = (TextResourceContents) actualResult.contents().get(0);
+        Map<String, Object> actualPayload = JsonUtils.fromJsonString(actualContent.text(), new TypeReference<>() {
+        });
+        assertThat(actualPayload, is(payload));
+        verify(controller).handle("shardingsphere://databases/logic_db");
     }
     
     private static Stream<Arguments> assertCreateResourceTemplateSpecificationsArguments() {
         return Stream.of(
-                Arguments.of("database resource", "shardingsphere://databases/{database}", "shardingsphere://databases/logic_db", "{database}", "database", "logic_db"),
-                Arguments.of("schema resource", "shardingsphere://databases/{database}/schemas/{schema}", "shardingsphere://databases/logic_db/schemas/public", "{schema}", "schema", "public"),
-                Arguments.of("sequence resource", "shardingsphere://databases/{database}/schemas/{schema}/sequences/{sequence}",
-                        "shardingsphere://databases/runtime_db/schemas/public/sequences/order_seq", "{sequence}", "sequence", "order_seq"));
+                Arguments.of("database resource", "shardingsphere://databases/{database}", "{database}"),
+                Arguments.of("schema resource", "shardingsphere://databases/{database}/schemas/{schema}", "{schema}"),
+                Arguments.of("sequence resource", "shardingsphere://databases/{database}/schemas/{schema}/sequences/{sequence}", "{sequence}"));
     }
     
     private SyncResourceSpecification findResourceSpecification(final List<SyncResourceSpecification> specifications, final String uri) {
@@ -127,5 +146,15 @@ class MCPResourceSpecificationFactoryTest {
     
     private MCPResourceSpecificationFactory createFactory() {
         return new MCPResourceSpecificationFactory(MCPBootstrapTestDataFactory.createRuntimeContext());
+    }
+    
+    private MCPResourceSpecificationFactory createFactory(final MCPResourceController controller) {
+        MCPResourceSpecificationFactory result = createFactory();
+        try {
+            Plugins.getMemberAccessor().set(MCPResourceSpecificationFactory.class.getDeclaredField("controller"), result, controller);
+        } catch (final ReflectiveOperationException ex) {
+            throw new IllegalStateException(ex);
+        }
+        return result;
     }
 }

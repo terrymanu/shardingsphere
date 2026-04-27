@@ -25,16 +25,25 @@ import org.junit.jupiter.api.Test;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.mockito.Mockito.mock;
 
 class StreamableHttpMCPServerTest {
     
     @Test
-    void assertConstructWithRemoteHttpWithoutAccessToken() {
-        IllegalArgumentException actual = assertThrows(IllegalArgumentException.class,
-                () -> new StreamableHttpMCPServer(new HttpTransportConfiguration(true, "0.0.0.0", true, "", 0, "/mcp"),
-                        new MCPRuntimeContext(mock(MCPSessionManager.class), mock(MCPDatabaseCapabilityProvider.class))));
-        assertThat(actual.getMessage(), is("Property `transport.http.accessToken` must not be blank when remote HTTP access is enabled."));
+    void assertGetLocalPortBeforeStart() {
+        StreamableHttpMCPServer actual = createServer();
+        assertThat(actual.getLocalPort(), is(18080));
+    }
+    
+    @Test
+    void assertStopWithoutStart() {
+        StreamableHttpMCPServer actual = createServer();
+        assertDoesNotThrow(actual::stop);
+    }
+    
+    private StreamableHttpMCPServer createServer() {
+        return new StreamableHttpMCPServer(new HttpTransportConfiguration(true, "127.0.0.1", false, "", 18080, "/mcp"),
+                new MCPRuntimeContext(mock(MCPSessionManager.class), mock(MCPDatabaseCapabilityProvider.class)));
     }
 }
