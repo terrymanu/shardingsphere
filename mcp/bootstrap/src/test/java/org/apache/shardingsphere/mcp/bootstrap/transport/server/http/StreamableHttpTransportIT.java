@@ -18,7 +18,6 @@
 package org.apache.shardingsphere.mcp.bootstrap.transport.server.http;
 
 import org.apache.shardingsphere.infra.util.json.JsonUtils;
-import org.apache.shardingsphere.mcp.bootstrap.fixture.BootstrapMockRuntimeDriver;
 import org.apache.shardingsphere.mcp.bootstrap.transport.MCPTransportConstants;
 import org.apache.shardingsphere.mcp.metadata.jdbc.RuntimeDatabaseConfiguration;
 import org.junit.jupiter.api.Test;
@@ -27,16 +26,32 @@ import java.io.IOException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.sql.Connection;
+import java.sql.DatabaseMetaData;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class StreamableHttpTransportIT extends AbstractStreamableHttpIT {
+    
+    private static final String DATABASE_TYPE = "MySQL";
+    
+    private static final String DATABASE_VERSION = "8.0.36";
+    
+    private static final String JDBC_URL = "jdbc:mysql://bootstrap-http/test";
     
     @Test
     void assertLaunchHttpServerWithConfiguredEndpoint() throws IOException, InterruptedException, SQLException {
@@ -224,7 +239,63 @@ class StreamableHttpTransportIT extends AbstractStreamableHttpIT {
     
     @Override
     protected Map<String, RuntimeDatabaseConfiguration> createRuntimeDatabases() {
-        return Map.of("logic_db", new RuntimeDatabaseConfiguration("H2", BootstrapMockRuntimeDriver.createJdbcUrl("streamable-http-runtime"), "", "", BootstrapMockRuntimeDriver.class.getName()));
+        return Map.of("logic_db", createRuntimeDatabaseConfiguration());
+    }
+    
+    private RuntimeDatabaseConfiguration createRuntimeDatabaseConfiguration() {
+        try {
+            Connection connection = createMetadataConnection();
+            RuntimeDatabaseConfiguration result = mock(RuntimeDatabaseConfiguration.class);
+            when(result.getDatabaseType()).thenReturn(DATABASE_TYPE);
+            when(result.openConnection(anyString())).thenReturn(connection);
+            return result;
+        } catch (final SQLException ex) {
+            throw new IllegalStateException(ex);
+        }
+    }
+    
+    private Connection createMetadataConnection() throws SQLException {
+        Connection result = mock(Connection.class);
+        DatabaseMetaData databaseMetaData = mock(DatabaseMetaData.class);
+        Map<String, List<String>> columns = Map.of(
+                "orders", List.of("amount", "order_id", "status"),
+                "order_items", List.of("item_id", "order_id", "sku"));
+        when(result.getMetaData()).thenReturn(databaseMetaData);
+        when(databaseMetaData.getDatabaseProductName()).thenReturn(DATABASE_TYPE);
+        when(databaseMetaData.getDatabaseProductVersion()).thenReturn(DATABASE_VERSION);
+        when(databaseMetaData.getURL()).thenReturn(JDBC_URL);
+        when(databaseMetaData.getTables(isNull(), isNull(), eq("%"), any(String[].class))).thenAnswer(invocation -> {
+            String[] tableTypes = invocation.getArgument(3);
+            return "TABLE".equals(tableTypes[0])
+                    ? mockMultiRowResultSet(List.of(Map.of("TABLE_NAME", "orders"), Map.of("TABLE_NAME", "order_items")))
+                    : mockMultiRowResultSet(List.of());
+        });
+        when(databaseMetaData.getColumns(isNull(), isNull(), anyString(), eq("%"))).thenAnswer(invocation -> {
+            String objectName = invocation.getArgument(2);
+            return mockResultSet("COLUMN_NAME", columns.getOrDefault(objectName, List.of()).toArray(new String[0]));
+        });
+        when(databaseMetaData.getIndexInfo(isNull(), isNull(), anyString(), eq(false), eq(false))).thenAnswer(invocation -> mockResultSet("INDEX_NAME"));
+        return result;
+    }
+    
+    private ResultSet mockResultSet(final String columnName, final String... values) throws SQLException {
+        ResultSet result = mock(ResultSet.class);
+        AtomicInteger nextIndex = new AtomicInteger();
+        AtomicInteger valueIndex = new AtomicInteger();
+        when(result.next()).thenAnswer(invocation -> nextIndex.getAndIncrement() < values.length);
+        when(result.getString(columnName)).thenAnswer(invocation -> values[valueIndex.getAndIncrement()]);
+        return result;
+    }
+    
+    private ResultSet mockMultiRowResultSet(final List<Map<String, String>> values) throws SQLException {
+        ResultSet result = mock(ResultSet.class);
+        AtomicInteger rowIndex = new AtomicInteger(-1);
+        when(result.next()).thenAnswer(invocation -> rowIndex.incrementAndGet() < values.size());
+        when(result.getString(anyString())).thenAnswer(invocation -> {
+            int currentRowIndex = rowIndex.get();
+            return 0 <= currentRowIndex && currentRowIndex < values.size() ? values.get(currentRowIndex).get(invocation.getArgument(0)) : null;
+        });
+        return result;
     }
     
     private HttpResponse<String> sendInitializeRequest(final HttpClient httpClient, final Map<String, String> requestHeaders,

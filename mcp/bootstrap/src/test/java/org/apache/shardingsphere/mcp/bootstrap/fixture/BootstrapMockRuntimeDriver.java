@@ -28,23 +28,14 @@ import java.sql.Driver;
 import java.sql.DriverManager;
 import java.sql.DriverPropertyInfo;
 import java.sql.ResultSet;
-import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
-import java.sql.SQLSyntaxErrorException;
-import java.sql.Statement;
-import java.sql.Types;
-import java.util.Arrays;
-import java.util.LinkedHashMap;
-import java.util.LinkedList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Properties;
 import java.util.logging.Logger;
 
 /**
- * Lightweight JDBC driver for bootstrap tests that only need stable H2-like metadata.
+ * Metadata-only JDBC driver for bootstrap STDIO tests.
  */
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class BootstrapMockRuntimeDriver implements Driver {
@@ -53,17 +44,15 @@ public final class BootstrapMockRuntimeDriver implements Driver {
     
     private static final String JDBC_URL_PREFIX = "jdbc:bootstrap-mock:";
     
-    private static final String DATABASE_PRODUCT_NAME = "H2";
+    private static final String DATABASE_PRODUCT_NAME = "MySQL";
     
-    private static final String DATABASE_PRODUCT_VERSION = "2.2.224";
-    
-    private static final String DEFAULT_SCHEMA = "public";
+    private static final String DATABASE_PRODUCT_VERSION = "8.0.36";
     
     private static final List<String> TABLE_NAMES = List.of("order_items", "orders");
     
-    private static final List<String> VIEW_NAMES = List.of("active_orders");
-    
-    private static final Map<String, List<String>> OBJECT_COLUMNS = createObjectColumns();
+    private static final Map<String, List<String>> TABLE_COLUMNS = Map.of(
+            "orders", List.of("amount", "order_id", "status"),
+            "order_items", List.of("item_id", "order_id", "sku"));
     
     private static final Map<String, List<String>> TABLE_INDEXES = Map.of(
             "orders", List.of("PRIMARY_KEY_C", "idx_orders_status"),
@@ -122,41 +111,20 @@ public final class BootstrapMockRuntimeDriver implements Driver {
         return Logger.getGlobal();
     }
     
-    private static Map<String, List<String>> createObjectColumns() {
-        Map<String, List<String>> result = new LinkedHashMap<>(3, 1F);
-        result.put("orders", List.of("amount", "order_id", "status"));
-        result.put("order_items", List.of("item_id", "order_id", "sku"));
-        result.put("active_orders", List.of("order_id", "status"));
-        return result;
-    }
-    
     private static Connection createConnection(final String jdbcUrl) {
         ConnectionState state = new ConnectionState(jdbcUrl);
         return (Connection) Proxy.newProxyInstance(BootstrapMockRuntimeDriver.class.getClassLoader(),
                 new Class[]{Connection.class}, (proxy, method, args) -> handleConnectionMethod(state, proxy, method, args));
     }
     
-    private static Object handleConnectionMethod(final ConnectionState state, final Object proxy, final Method method, final Object[] args) throws SQLException {
+    private static Object handleConnectionMethod(final ConnectionState state, final Object proxy, final Method method, final Object[] args) {
         String methodName = method.getName();
         if ("getMetaData".equals(methodName)) {
             return createDatabaseMetaData(state.jdbcUrl);
         }
-        if ("createStatement".equals(methodName)) {
-            return createStatement(state);
-        }
-        if ("setSchema".equals(methodName)) {
-            state.schema = Objects.toString(args[0], DEFAULT_SCHEMA);
+        if ("close".equals(methodName)) {
+            state.closed = true;
             return null;
-        }
-        if ("getSchema".equals(methodName)) {
-            return state.schema;
-        }
-        if ("setAutoCommit".equals(methodName) || "commit".equals(methodName) || "rollback".equals(methodName) || "close".equals(methodName)) {
-            state.closed = "close".equals(methodName);
-            return null;
-        }
-        if ("getAutoCommit".equals(methodName)) {
-            return true;
         }
         if ("isClosed".equals(methodName)) {
             return state.closed;
@@ -187,133 +155,31 @@ public final class BootstrapMockRuntimeDriver implements Driver {
             return createTablesResultSet((String[]) args[3]);
         }
         if ("getColumns".equals(methodName)) {
-            return createColumnsResultSet(Objects.toString(args[2], ""));
+            return createColumnsResultSet(String.valueOf(args[2]));
         }
         if ("getIndexInfo".equals(methodName)) {
-            return createIndexesResultSet(Objects.toString(args[2], ""));
-        }
-        return handleCommonObjectMethod(proxy, method, args);
-    }
-    
-    private static Statement createStatement(final ConnectionState connectionState) {
-        StatementState state = new StatementState(connectionState);
-        return (Statement) Proxy.newProxyInstance(BootstrapMockRuntimeDriver.class.getClassLoader(),
-                new Class[]{Statement.class}, (proxy, method, args) -> handleStatementMethod(state, proxy, method, args));
-    }
-    
-    private static Object handleStatementMethod(final StatementState state, final Object proxy, final Method method, final Object[] args) throws SQLException {
-        String methodName = method.getName();
-        if ("execute".equals(methodName)) {
-            state.resultSet = createQueryResultSet(Objects.toString(args[0], ""));
-            state.updateCount = -1;
-            return true;
-        }
-        if ("executeQuery".equals(methodName)) {
-            state.resultSet = createStatementQueryResultSet(Objects.toString(args[0], ""));
-            state.updateCount = -1;
-            return state.resultSet;
-        }
-        if ("getResultSet".equals(methodName)) {
-            return state.resultSet;
-        }
-        if ("getUpdateCount".equals(methodName)) {
-            return state.updateCount;
-        }
-        if ("setMaxRows".equals(methodName)) {
-            state.maxRows = (int) args[0];
-            return null;
-        }
-        if ("getMaxRows".equals(methodName)) {
-            return state.maxRows;
-        }
-        if ("setQueryTimeout".equals(methodName)) {
-            state.queryTimeout = (int) args[0];
-            return null;
-        }
-        if ("getQueryTimeout".equals(methodName)) {
-            return state.queryTimeout;
-        }
-        if ("getConnection".equals(methodName)) {
-            return state.getConnection();
-        }
-        if ("close".equals(methodName)) {
-            state.closed = true;
-            return null;
-        }
-        if ("isClosed".equals(methodName)) {
-            return state.closed;
+            return createIndexesResultSet(String.valueOf(args[2]));
         }
         return handleCommonObjectMethod(proxy, method, args);
     }
     
     private static ResultSet createTablesResultSet(final String[] types) {
-        List<String> actualTypes = null == types ? List.of("TABLE", "VIEW") : List.of(types);
-        List<List<Object>> rows = new LinkedList<>();
-        if (actualTypes.contains("TABLE")) {
-            for (String each : TABLE_NAMES) {
-                rows.add(Arrays.asList(null, DEFAULT_SCHEMA, each));
-            }
+        if (null != types && !List.of(types).contains("TABLE")) {
+            return createResultSet(List.of());
         }
-        if (actualTypes.contains("VIEW")) {
-            for (String each : VIEW_NAMES) {
-                rows.add(Arrays.asList(null, DEFAULT_SCHEMA, each));
-            }
-        }
-        return createResultSet(List.of(
-                new ColumnDefinition("TABLE_CAT", "VARCHAR", false),
-                new ColumnDefinition("TABLE_SCHEM", "VARCHAR", false),
-                new ColumnDefinition("TABLE_NAME", "VARCHAR", true)), rows);
+        return createResultSet(TABLE_NAMES.stream().map(each -> Map.of("TABLE_NAME", each)).toList());
     }
     
     private static ResultSet createColumnsResultSet(final String objectName) {
-        List<List<Object>> rows = new LinkedList<>();
-        for (String each : OBJECT_COLUMNS.getOrDefault(objectName, List.of())) {
-            rows.add(List.of(each));
-        }
-        return createResultSet(List.of(new ColumnDefinition("COLUMN_NAME", "VARCHAR", true)), rows);
+        return createResultSet(TABLE_COLUMNS.getOrDefault(objectName, List.of()).stream().map(each -> Map.of("COLUMN_NAME", each)).toList());
     }
     
     private static ResultSet createIndexesResultSet(final String tableName) {
-        List<List<Object>> rows = new LinkedList<>();
-        for (String each : TABLE_INDEXES.getOrDefault(tableName, List.of())) {
-            rows.add(List.of(each));
-        }
-        return createResultSet(List.of(new ColumnDefinition("INDEX_NAME", "VARCHAR", true)), rows);
+        return createResultSet(TABLE_INDEXES.getOrDefault(tableName, List.of()).stream().map(each -> Map.of("INDEX_NAME", each)).toList());
     }
     
-    private static ResultSet createStatementQueryResultSet(final String sql) throws SQLSyntaxErrorException {
-        String normalizedSql = normalizeSql(sql);
-        if ("SELECT SEQUENCE_SCHEMA, SEQUENCE_NAME FROM INFORMATION_SCHEMA.SEQUENCES".equals(normalizedSql)) {
-            return createResultSet(List.of(
-                    new ColumnDefinition("SEQUENCE_SCHEMA", "VARCHAR", true),
-                    new ColumnDefinition("SEQUENCE_NAME", "VARCHAR", true)), List.of(List.of(DEFAULT_SCHEMA, "order_seq")));
-        }
-        if ("SELECT VERSION()".equals(normalizedSql)) {
-            return createResultSet(List.of(new ColumnDefinition("VERSION()", "VARCHAR", true)), List.of(List.of(DATABASE_PRODUCT_VERSION)));
-        }
-        if ("SELECT @@VERSION_COMMENT".equals(normalizedSql)) {
-            return createResultSet(List.of(new ColumnDefinition("@@version_comment", "VARCHAR", true)), List.of(List.of("bootstrap-mock")));
-        }
-        if ("SELECT 1".equals(normalizedSql)) {
-            return createSelectOneResultSet();
-        }
-        throw new SQLSyntaxErrorException("Unsupported bootstrap mock query: " + sql);
-    }
-    
-    private static ResultSet createQueryResultSet(final String sql) throws SQLSyntaxErrorException {
-        String normalizedSql = normalizeSql(sql);
-        if ("SELECT 1".equals(normalizedSql)) {
-            return createSelectOneResultSet();
-        }
-        throw new SQLSyntaxErrorException("Unsupported bootstrap mock execute: " + sql);
-    }
-    
-    private static ResultSet createSelectOneResultSet() {
-        return createResultSet(List.of(new ColumnDefinition("1", "INTEGER", true)), List.of(List.of(1)));
-    }
-    
-    private static ResultSet createResultSet(final List<ColumnDefinition> columns, final List<List<Object>> rows) {
-        ResultSetState state = new ResultSetState(columns, rows);
+    private static ResultSet createResultSet(final List<Map<String, String>> rows) {
+        ResultSetState state = new ResultSetState(rows);
         return (ResultSet) Proxy.newProxyInstance(BootstrapMockRuntimeDriver.class.getClassLoader(),
                 new Class[]{ResultSet.class}, (proxy, method, args) -> handleResultSetMethod(state, proxy, method, args));
     }
@@ -329,21 +195,7 @@ public final class BootstrapMockRuntimeDriver implements Driver {
             return false;
         }
         if ("getString".equals(methodName)) {
-            Object value = state.getValue(args[0]);
-            return null == value ? null : String.valueOf(value);
-        }
-        if ("getInt".equals(methodName)) {
-            Object value = state.getValue(args[0]);
-            return value instanceof Number ? ((Number) value).intValue() : Integer.parseInt(String.valueOf(value));
-        }
-        if ("getObject".equals(methodName)) {
-            return state.getValue(args[0]);
-        }
-        if ("findColumn".equals(methodName)) {
-            return state.findColumn(String.valueOf(args[0])) + 1;
-        }
-        if ("getMetaData".equals(methodName)) {
-            return createResultSetMetaData(state.columns);
+            return state.getValue(String.valueOf(args[0]));
         }
         if ("close".equals(methodName)) {
             state.closed = true;
@@ -354,37 +206,6 @@ public final class BootstrapMockRuntimeDriver implements Driver {
         }
         if ("wasNull".equals(methodName)) {
             return false;
-        }
-        return handleCommonObjectMethod(proxy, method, args);
-    }
-    
-    private static ResultSetMetaData createResultSetMetaData(final List<ColumnDefinition> columns) {
-        return (ResultSetMetaData) Proxy.newProxyInstance(BootstrapMockRuntimeDriver.class.getClassLoader(),
-                new Class[]{ResultSetMetaData.class}, (proxy, method, args) -> handleResultSetMetaDataMethod(columns, proxy, method, args));
-    }
-    
-    private static Object handleResultSetMetaDataMethod(final List<ColumnDefinition> columns, final Object proxy, final Method method, final Object[] args) {
-        String methodName = method.getName();
-        if ("getColumnCount".equals(methodName)) {
-            return columns.size();
-        }
-        if ("getColumnLabel".equals(methodName) || "getColumnName".equals(methodName)) {
-            return columns.get(((int) args[0]) - 1).label();
-        }
-        if ("getColumnTypeName".equals(methodName)) {
-            return columns.get(((int) args[0]) - 1).typeName();
-        }
-        if ("getColumnType".equals(methodName)) {
-            return columns.get(((int) args[0]) - 1).sqlType();
-        }
-        if ("isNullable".equals(methodName)) {
-            return columns.get(((int) args[0]) - 1).notNull() ? ResultSetMetaData.columnNoNulls : ResultSetMetaData.columnNullable;
-        }
-        if ("isSigned".equals(methodName)) {
-            return Types.INTEGER == columns.get(((int) args[0]) - 1).sqlType();
-        }
-        if ("getColumnDisplaySize".equals(methodName)) {
-            return 32;
         }
         return handleCommonObjectMethod(proxy, method, args);
     }
@@ -434,80 +255,31 @@ public final class BootstrapMockRuntimeDriver implements Driver {
         return null;
     }
     
-    private static String normalizeSql(final String sql) {
-        return sql.trim().replaceAll("\\s+", " ").toUpperCase(Locale.ENGLISH);
-    }
-    
     private static final class ConnectionState {
         
         private final String jdbcUrl;
         
         private boolean closed;
         
-        private String schema = DEFAULT_SCHEMA;
-        
         private ConnectionState(final String jdbcUrl) {
             this.jdbcUrl = jdbcUrl;
         }
     }
     
-    private static final class StatementState {
-        
-        private final ConnectionState connectionState;
-        
-        private ResultSet resultSet;
-        
-        private int updateCount = -1;
-        
-        private int maxRows;
-        
-        private int queryTimeout;
-        
-        private boolean closed;
-        
-        private StatementState(final ConnectionState connectionState) {
-            this.connectionState = connectionState;
-        }
-        
-        private Connection getConnection() {
-            return createConnection(connectionState.jdbcUrl);
-        }
-    }
-    
     private static final class ResultSetState {
         
-        private final List<ColumnDefinition> columns;
-        
-        private final List<List<Object>> rows;
+        private final List<Map<String, String>> rows;
         
         private int rowIndex = -1;
         
         private boolean closed;
         
-        private ResultSetState(final List<ColumnDefinition> columns, final List<List<Object>> rows) {
-            this.columns = columns;
+        private ResultSetState(final List<Map<String, String>> rows) {
             this.rows = rows;
         }
         
-        private Object getValue(final Object key) {
-            List<Object> row = rows.get(rowIndex);
-            return key instanceof Integer ? row.get(((int) key) - 1) : row.get(findColumn(String.valueOf(key)));
-        }
-        
-        private int findColumn(final String columnLabel) {
-            for (int index = 0; index < columns.size(); index++) {
-                if (columns.get(index).label().equalsIgnoreCase(columnLabel)) {
-                    return index;
-                }
-            }
-            throw new IllegalArgumentException("Unknown column label: " + columnLabel);
-        }
-    }
-    
-    private record ColumnDefinition(String label, String typeName, boolean notNull) {
-        
-        private int sqlType() {
-            return "INTEGER".equalsIgnoreCase(typeName) ? Types.INTEGER : Types.VARCHAR;
+        private String getValue(final String columnLabel) {
+            return rows.get(rowIndex).get(columnLabel);
         }
     }
 }

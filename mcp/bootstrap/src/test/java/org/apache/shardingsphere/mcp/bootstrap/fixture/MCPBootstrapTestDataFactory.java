@@ -19,38 +19,22 @@ package org.apache.shardingsphere.mcp.bootstrap.fixture;
 
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
-import org.apache.shardingsphere.mcp.capability.database.MCPDatabaseCapabilityProvider;
 import org.apache.shardingsphere.mcp.context.MCPRuntimeContext;
-import org.apache.shardingsphere.mcp.metadata.jdbc.RuntimeDatabaseConfiguration;
-import org.apache.shardingsphere.mcp.session.MCPSessionManager;
 
-import java.util.LinkedHashMap;
-import java.util.Map;
+import static org.mockito.Mockito.mock;
 
 /**
- * Bootstrap test data factory.
+ * Bootstrap transport test data factory.
  */
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class MCPBootstrapTestDataFactory {
     
     /**
-     * Create runtime context.
+     * Create one placeholder runtime context for specification tests.
      *
      * @return runtime context
      */
     public static MCPRuntimeContext createRuntimeContext() {
-        Map<String, RuntimeDatabaseConfiguration> runtimeDatabases = createRuntimeDatabases();
-        return new MCPRuntimeContext(new MCPSessionManager(runtimeDatabases), new MCPDatabaseCapabilityProvider(runtimeDatabases));
-    }
-    
-    private static Map<String, RuntimeDatabaseConfiguration> createRuntimeDatabases() {
-        Map<String, RuntimeDatabaseConfiguration> result = new LinkedHashMap<>(2, 1F);
-        result.put("logic_db", createMockRuntimeDatabaseConfiguration("logic-db"));
-        result.put("runtime_db", createMockRuntimeDatabaseConfiguration("runtime-db"));
-        return result;
-    }
-    
-    private static RuntimeDatabaseConfiguration createMockRuntimeDatabaseConfiguration(final String databaseName) {
-        return new RuntimeDatabaseConfiguration("H2", BootstrapMockRuntimeDriver.createJdbcUrl(databaseName), "", "", BootstrapMockRuntimeDriver.class.getName());
+        return mock(MCPRuntimeContext.class);
     }
 }

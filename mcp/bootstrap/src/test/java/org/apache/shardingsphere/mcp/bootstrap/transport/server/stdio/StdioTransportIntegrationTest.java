@@ -138,7 +138,7 @@ class StdioTransportIntegrationTest {
                 + "    enabled: true\n"
                 + "runtimeDatabases:\n"
                 + "  logic_db:\n"
-                + "    databaseType: H2\n"
+                + "    databaseType: MySQL\n"
                 + "    jdbcUrl: '" + jdbcUrl + "'\n"
                 + "    username: ''\n"
                 + "    password: ''\n"
