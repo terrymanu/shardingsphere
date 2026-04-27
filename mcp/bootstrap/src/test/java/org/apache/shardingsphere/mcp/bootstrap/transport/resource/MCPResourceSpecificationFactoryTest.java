@@ -19,7 +19,7 @@ package org.apache.shardingsphere.mcp.bootstrap.transport.resource;
 
 import io.modelcontextprotocol.server.McpServerFeatures.SyncResourceSpecification;
 import io.modelcontextprotocol.server.McpServerFeatures.SyncResourceTemplateSpecification;
-import org.apache.shardingsphere.mcp.bootstrap.fixture.MCPBootstrapTestDataFactory;
+import org.apache.shardingsphere.mcp.context.MCPRuntimeContext;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -32,6 +32,7 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
 
 class MCPResourceSpecificationFactoryTest {
     
@@ -93,6 +94,6 @@ class MCPResourceSpecificationFactoryTest {
     }
     
     private MCPResourceSpecificationFactory createFactory() {
-        return new MCPResourceSpecificationFactory(MCPBootstrapTestDataFactory.createRuntimeContext());
+        return new MCPResourceSpecificationFactory(mock(MCPRuntimeContext.class));
     }
 }

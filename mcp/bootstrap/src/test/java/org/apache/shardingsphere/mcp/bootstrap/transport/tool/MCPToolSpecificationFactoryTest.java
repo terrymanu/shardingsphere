@@ -18,7 +18,7 @@
 package org.apache.shardingsphere.mcp.bootstrap.transport.tool;
 
 import io.modelcontextprotocol.server.McpServerFeatures.SyncToolSpecification;
-import org.apache.shardingsphere.mcp.bootstrap.fixture.MCPBootstrapTestDataFactory;
+import org.apache.shardingsphere.mcp.context.MCPRuntimeContext;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -35,6 +35,7 @@ import static org.hamcrest.Matchers.is;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
 
 class MCPToolSpecificationFactoryTest {
     
@@ -78,7 +79,7 @@ class MCPToolSpecificationFactoryTest {
     }
     
     private MCPToolSpecificationFactory createFactory() {
-        return new MCPToolSpecificationFactory(MCPBootstrapTestDataFactory.createRuntimeContext());
+        return new MCPToolSpecificationFactory(mock(MCPRuntimeContext.class));
     }
     
     private static Stream<Arguments> assertCreateToolSpecificationsArguments() {
