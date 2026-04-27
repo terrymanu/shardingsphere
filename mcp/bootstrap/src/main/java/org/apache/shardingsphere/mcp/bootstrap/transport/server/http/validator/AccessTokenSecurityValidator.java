@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package org.apache.shardingsphere.mcp.bootstrap.transport.server.http;
+package org.apache.shardingsphere.mcp.bootstrap.transport.server.http.validator;
 
 import io.modelcontextprotocol.server.transport.ServerTransportSecurityException;
 import io.modelcontextprotocol.server.transport.ServerTransportSecurityValidator;
@@ -26,8 +26,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
+/**
+ * Access token security validator.
+ */
 @RequiredArgsConstructor(access = AccessLevel.PRIVATE)
-final class AccessTokenSecurityValidator implements ServerTransportSecurityValidator {
+public final class AccessTokenSecurityValidator implements ServerTransportSecurityValidator {
     
     private static final String AUTHORIZATION_HEADER = "Authorization";
     
@@ -35,7 +38,13 @@ final class AccessTokenSecurityValidator implements ServerTransportSecurityValid
     
     private final String accessToken;
     
-    static ServerTransportSecurityValidator create(final String accessToken) {
+    /**
+     * Create validator.
+     * 
+     * @param accessToken access token
+     * @return created validator
+     */
+    public static ServerTransportSecurityValidator create(final String accessToken) {
         String actualAccessToken = Objects.toString(accessToken, "").trim();
         return actualAccessToken.isEmpty() ? NOOP : new AccessTokenSecurityValidator(actualAccessToken);
     }

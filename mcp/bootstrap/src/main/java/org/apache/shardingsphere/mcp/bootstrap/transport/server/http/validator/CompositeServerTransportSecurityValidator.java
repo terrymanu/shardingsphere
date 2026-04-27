@@ -15,25 +15,27 @@
  * limitations under the License.
  */
 
-package org.apache.shardingsphere.mcp.bootstrap.transport.server.http;
+package org.apache.shardingsphere.mcp.bootstrap.transport.server.http.validator;
 
-import lombok.AccessLevel;
-import lombok.NoArgsConstructor;
+import io.modelcontextprotocol.server.transport.ServerTransportSecurityException;
+import io.modelcontextprotocol.server.transport.ServerTransportSecurityValidator;
+import lombok.RequiredArgsConstructor;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
-import java.util.Objects;
 
-@NoArgsConstructor(access = AccessLevel.PRIVATE)
-final class HttpTransportSecurityHeaderUtils {
+/**
+ * Composite server transport security validator.
+ */
+@RequiredArgsConstructor
+public final class CompositeServerTransportSecurityValidator implements ServerTransportSecurityValidator {
     
-    static String getFirstHeaderValue(final Map<String, List<String>> headers, final String headerName) {
-        for (Entry<String, List<String>> entry : headers.entrySet()) {
-            if (headerName.equalsIgnoreCase(entry.getKey()) && !entry.getValue().isEmpty()) {
-                return Objects.toString(entry.getValue().get(0), "").trim();
-            }
+    private final List<ServerTransportSecurityValidator> delegates;
+    
+    @Override
+    public void validateHeaders(final Map<String, List<String>> headers) throws ServerTransportSecurityException {
+        for (ServerTransportSecurityValidator each : delegates) {
+            each.validateHeaders(headers);
         }
-        return "";
     }
 }

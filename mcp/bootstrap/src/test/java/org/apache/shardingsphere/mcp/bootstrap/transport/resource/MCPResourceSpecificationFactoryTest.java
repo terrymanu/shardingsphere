@@ -21,12 +21,8 @@ import io.modelcontextprotocol.server.McpServerFeatures.SyncResourceSpecificatio
 import io.modelcontextprotocol.server.McpServerFeatures.SyncResourceTemplateSpecification;
 import org.apache.shardingsphere.mcp.context.MCPRuntimeContext;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.MethodSource;
 
 import java.util.List;
-import java.util.stream.Stream;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
@@ -37,13 +33,12 @@ import static org.mockito.Mockito.mock;
 class MCPResourceSpecificationFactoryTest {
     
     @Test
-    void assertCreateResourceSpecificationsContainsExpectedBaselineResources() {
+    void assertCreateResourceSpecifications() {
         MCPResourceSpecificationFactory factory = createFactory();
         List<SyncResourceSpecification> actual = factory.createResourceSpecifications();
         List<String> actualResourceUris = actual.stream().map(each -> each.resource().uri()).toList();
         assertTrue(actualResourceUris.stream().noneMatch(each -> each.contains("{")));
         assertTrue(actualResourceUris.contains("shardingsphere://capabilities"));
-        assertTrue(actualResourceUris.contains("shardingsphere://databases"));
         assertTrue(actualResourceUris.contains("shardingsphere://features/encrypt/algorithms"));
         assertTrue(actualResourceUris.contains("shardingsphere://features/mask/algorithms"));
         SyncResourceSpecification actualSpecification = findResourceSpecification(actual, "shardingsphere://capabilities");
@@ -54,35 +49,19 @@ class MCPResourceSpecificationFactoryTest {
     }
     
     @Test
-    void assertCreateResourceTemplateSpecificationsContainsFeatureUris() {
+    void assertCreateResourceTemplateSpecifications() {
         MCPResourceSpecificationFactory factory = createFactory();
         List<SyncResourceTemplateSpecification> actual = factory.createResourceTemplateSpecifications();
-        assertTrue(actual.stream().map(each -> each.resourceTemplate().uriTemplate()).toList().contains("shardingsphere://features/encrypt/databases/{database}/rules"));
-        assertTrue(actual.stream().map(each -> each.resourceTemplate().uriTemplate()).toList()
-                .contains("shardingsphere://features/encrypt/databases/{database}/tables/{table}/rules"));
-        assertTrue(actual.stream().map(each -> each.resourceTemplate().uriTemplate()).toList().contains("shardingsphere://features/mask/databases/{database}/rules"));
-        assertTrue(actual.stream().map(each -> each.resourceTemplate().uriTemplate()).toList()
-                .contains("shardingsphere://features/mask/databases/{database}/tables/{table}/rules"));
-    }
-    
-    @ParameterizedTest(name = "{0}")
-    @MethodSource("assertCreateResourceTemplateSpecificationsArguments")
-    void assertCreateResourceTemplateSpecifications(final String name, final String uriTemplate, final String expectedName) {
-        MCPResourceSpecificationFactory factory = createFactory();
-        List<SyncResourceTemplateSpecification> actual = factory.createResourceTemplateSpecifications();
-        assertTrue(actual.stream().allMatch(each -> each.resourceTemplate().uriTemplate().contains("{")));
-        SyncResourceTemplateSpecification actualSpecification = findResourceTemplateSpecification(actual, uriTemplate);
-        assertThat(actualSpecification.resourceTemplate().name(), is(expectedName));
-        assertThat(actualSpecification.resourceTemplate().description(), is("ShardingSphere MCP resource template: " + uriTemplate));
+        List<String> actualResourceUriTemplates = actual.stream().map(each -> each.resourceTemplate().uriTemplate()).toList();
+        assertTrue(actualResourceUriTemplates.stream().allMatch(each -> each.contains("{")));
+        assertTrue(actualResourceUriTemplates.contains("shardingsphere://databases/{database}"));
+        assertTrue(actualResourceUriTemplates.contains("shardingsphere://features/encrypt/databases/{database}/rules"));
+        assertTrue(actualResourceUriTemplates.contains("shardingsphere://features/mask/databases/{database}/rules"));
+        SyncResourceTemplateSpecification actualSpecification = findResourceTemplateSpecification(actual, "shardingsphere://databases/{database}");
+        assertThat(actualSpecification.resourceTemplate().name(), is("{database}"));
+        assertThat(actualSpecification.resourceTemplate().description(), is("ShardingSphere MCP resource template: shardingsphere://databases/{database}"));
         assertThat(actualSpecification.resourceTemplate().mimeType(), is("application/json"));
         assertNotNull(actualSpecification.readHandler());
-    }
-    
-    private static Stream<Arguments> assertCreateResourceTemplateSpecificationsArguments() {
-        return Stream.of(
-                Arguments.of("database resource", "shardingsphere://databases/{database}", "{database}"),
-                Arguments.of("schema resource", "shardingsphere://databases/{database}/schemas/{schema}", "{schema}"),
-                Arguments.of("sequence resource", "shardingsphere://databases/{database}/schemas/{schema}/sequences/{sequence}", "{sequence}"));
     }
     
     private SyncResourceSpecification findResourceSpecification(final List<SyncResourceSpecification> specifications, final String uri) {

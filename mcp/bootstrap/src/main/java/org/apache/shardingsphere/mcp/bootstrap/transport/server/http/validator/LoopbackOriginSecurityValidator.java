@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package org.apache.shardingsphere.mcp.bootstrap.transport.server.http;
+package org.apache.shardingsphere.mcp.bootstrap.transport.server.http.validator;
 
 import io.modelcontextprotocol.server.transport.ServerTransportSecurityException;
 import io.modelcontextprotocol.server.transport.ServerTransportSecurityValidator;
@@ -26,13 +26,22 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-final class LoopbackOriginSecurityValidator implements ServerTransportSecurityValidator {
+/**
+ * Loopback origin security validator.
+ */
+public final class LoopbackOriginSecurityValidator implements ServerTransportSecurityValidator {
     
     private static final String ORIGIN_HEADER = "Origin";
     
     private static final String FORBIDDEN_MESSAGE = "Origin is not allowed for the current binding.";
     
-    static ServerTransportSecurityValidator create(final String bindHost) {
+    /**
+     * Create validator.
+     * 
+     * @param bindHost bind host
+     * @return created validator
+     */
+    public static ServerTransportSecurityValidator create(final String bindHost) {
         return HttpTransportHostUtils.isLoopbackHost(bindHost) ? new LoopbackOriginSecurityValidator() : NOOP;
     }
     
