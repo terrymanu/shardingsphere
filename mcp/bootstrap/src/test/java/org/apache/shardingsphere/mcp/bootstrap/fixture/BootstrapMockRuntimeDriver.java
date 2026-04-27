@@ -19,6 +19,7 @@ package org.apache.shardingsphere.mcp.bootstrap.fixture;
 
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
+import lombok.RequiredArgsConstructor;
 
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
@@ -77,7 +78,7 @@ public final class BootstrapMockRuntimeDriver implements Driver {
     }
     
     @Override
-    public Connection connect(final String url, final Properties info) throws SQLException {
+    public Connection connect(final String url, final Properties info) {
         return acceptsURL(url) ? createConnection(url) : null;
     }
     
@@ -255,17 +256,15 @@ public final class BootstrapMockRuntimeDriver implements Driver {
         return null;
     }
     
+    @RequiredArgsConstructor(access = AccessLevel.PRIVATE)
     private static final class ConnectionState {
         
         private final String jdbcUrl;
         
         private boolean closed;
-        
-        private ConnectionState(final String jdbcUrl) {
-            this.jdbcUrl = jdbcUrl;
-        }
     }
     
+    @RequiredArgsConstructor(access = AccessLevel.PRIVATE)
     private static final class ResultSetState {
         
         private final List<Map<String, String>> rows;
@@ -273,10 +272,6 @@ public final class BootstrapMockRuntimeDriver implements Driver {
         private int rowIndex = -1;
         
         private boolean closed;
-        
-        private ResultSetState(final List<Map<String, String>> rows) {
-            this.rows = rows;
-        }
         
         private String getValue(final String columnLabel) {
             return rows.get(rowIndex).get(columnLabel);
