@@ -19,11 +19,14 @@ package org.apache.shardingsphere.mcp.bootstrap.transport.server.http;
 
 import io.modelcontextprotocol.server.transport.ServerTransportSecurityException;
 import io.modelcontextprotocol.server.transport.ServerTransportSecurityValidator;
+import lombok.AccessLevel;
+import lombok.RequiredArgsConstructor;
 
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
+@RequiredArgsConstructor(access = AccessLevel.PRIVATE)
 final class AccessTokenSecurityValidator implements ServerTransportSecurityValidator {
     
     private static final String AUTHORIZATION_HEADER = "Authorization";
@@ -31,10 +34,6 @@ final class AccessTokenSecurityValidator implements ServerTransportSecurityValid
     private static final String UNAUTHORIZED_MESSAGE = "Unauthorized.";
     
     private final String accessToken;
-    
-    private AccessTokenSecurityValidator(final String accessToken) {
-        this.accessToken = accessToken;
-    }
     
     static ServerTransportSecurityValidator create(final String accessToken) {
         String actualAccessToken = Objects.toString(accessToken, "").trim();

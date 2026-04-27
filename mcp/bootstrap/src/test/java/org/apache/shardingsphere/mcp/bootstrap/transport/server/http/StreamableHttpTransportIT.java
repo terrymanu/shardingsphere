@@ -531,5 +531,4 @@ class StreamableHttpTransportIT {
     
     private record RuntimeHttpSession(HttpClient httpClient, String sessionId, String accessToken) {
     }
-    
 }
