@@ -18,12 +18,15 @@
 package org.apache.shardingsphere.proxy.frontend.mysql.command.query.text.query;
 
 import lombok.Getter;
+import org.apache.shardingsphere.database.protocol.mysql.constant.MySQLBinaryColumnType;
 import org.apache.shardingsphere.database.protocol.mysql.constant.MySQLConstants;
 import org.apache.shardingsphere.database.protocol.mysql.packet.MySQLPacket;
 import org.apache.shardingsphere.database.protocol.mysql.packet.command.query.text.MySQLTextResultSetRowPacket;
 import org.apache.shardingsphere.database.protocol.mysql.packet.command.query.text.query.MySQLComQueryPacket;
 import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
+import org.apache.shardingsphere.infra.annotation.HighFrequencyInvocation;
 import org.apache.shardingsphere.proxy.backend.handler.ProxyBackendHandler;
+import org.apache.shardingsphere.proxy.backend.response.data.QueryResponseCell;
 import org.apache.shardingsphere.proxy.backend.response.header.ResponseHeader;
 import org.apache.shardingsphere.proxy.backend.response.header.query.QueryResponseHeader;
 import org.apache.shardingsphere.proxy.backend.response.header.update.MultiStatementsUpdateResponseHeader;
@@ -35,6 +38,8 @@ import org.apache.shardingsphere.proxy.frontend.mysql.command.ServerStatusFlagCa
 import org.apache.shardingsphere.proxy.frontend.mysql.command.query.builder.ResponsePacketBuilder;
 
 import java.sql.SQLException;
+import java.sql.Types;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedList;
 
@@ -96,8 +101,16 @@ public final class MySQLComQueryPacketExecutor implements QueryCommandExecutor {
     }
     
     @Override
+    @HighFrequencyInvocation
     public MySQLPacket getQueryRowPacket() throws SQLException {
-        return new MySQLTextResultSetRowPacket(proxyBackendHandler.getRowData().getData());
+        Collection<QueryResponseCell> cells = proxyBackendHandler.getRowData().getCells();
+        Collection<Object> data = new ArrayList<>(cells.size());
+        for (QueryResponseCell each : cells) {
+            Object value = each.getData();
+            boolean yearColumn = Types.INTEGER == each.getJdbcType() && MySQLBinaryColumnType.YEAR == ResponsePacketBuilder.getColumnType(each.getJdbcType(), each.getColumnTypeName().orElse(null));
+            data.add(yearColumn && Integer.valueOf(0).equals(value) ? "0000" : value);
+        }
+        return new MySQLTextResultSetRowPacket(data);
     }
     
     @Override

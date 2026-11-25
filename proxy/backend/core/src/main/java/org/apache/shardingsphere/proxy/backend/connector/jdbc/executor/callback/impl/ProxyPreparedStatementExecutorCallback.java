@@ -35,7 +35,13 @@ public final class ProxyPreparedStatementExecutorCallback extends ProxyJDBCExecu
     public ProxyPreparedStatementExecutorCallback(final DatabaseType protocolType, final ResourceMetaData resourceMetaData, final SQLStatement sqlStatement,
                                                   final DatabaseProxyConnector databaseProxyConnector, final boolean isReturnGeneratedKeys,
                                                   final boolean isExceptionThrown, final boolean fetchMetaData) {
-        super(protocolType, resourceMetaData, sqlStatement, databaseProxyConnector, isReturnGeneratedKeys, isExceptionThrown, fetchMetaData);
+        this(protocolType, resourceMetaData, sqlStatement, databaseProxyConnector, isReturnGeneratedKeys, isExceptionThrown, fetchMetaData, false);
+    }
+    
+    public ProxyPreparedStatementExecutorCallback(final DatabaseType protocolType, final ResourceMetaData resourceMetaData, final SQLStatement sqlStatement,
+                                                  final DatabaseProxyConnector databaseProxyConnector, final boolean isReturnGeneratedKeys, final boolean isExceptionThrown,
+                                                  final boolean fetchMetaData, final boolean readYearAsInteger) {
+        super(protocolType, resourceMetaData, sqlStatement, databaseProxyConnector, isReturnGeneratedKeys, isExceptionThrown, fetchMetaData, readYearAsInteger);
     }
     
     @Override

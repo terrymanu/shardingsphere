@@ -45,6 +45,8 @@ import java.sql.Types;
 import java.time.LocalTime;
 import java.time.ZonedDateTime;
 import java.util.Calendar;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.Optional;
 
 /**
@@ -57,6 +59,9 @@ public final class JDBCStreamQueryResult extends AbstractStreamQueryResult {
     
     private final boolean containsJDBCResultSet;
     
+    @Getter(AccessLevel.NONE)
+    private final Collection<Integer> integerColumnIndexes;
+    
     /**
      * Custom TIME reader, or {@code null} for native JDBC reading.
      */
@@ -68,9 +73,14 @@ public final class JDBCStreamQueryResult extends AbstractStreamQueryResult {
     }
     
     public JDBCStreamQueryResult(final ResultSet resultSet, final boolean containsJDBCResultSet) throws SQLException {
+        this(resultSet, containsJDBCResultSet, Collections.emptySet());
+    }
+    
+    private JDBCStreamQueryResult(final ResultSet resultSet, final boolean containsJDBCResultSet, final Collection<Integer> integerColumnIndexes) throws SQLException {
         super(new JDBCQueryResultMetaData(resultSet.getMetaData()));
         this.resultSet = resultSet;
         this.containsJDBCResultSet = containsJDBCResultSet;
+        this.integerColumnIndexes = integerColumnIndexes;
     }
     
     public JDBCStreamQueryResult(final ResultSet resultSet, final DatabaseType storageType) throws SQLException {
@@ -79,7 +89,12 @@ public final class JDBCStreamQueryResult extends AbstractStreamQueryResult {
     
     @HighFrequencyInvocation
     public JDBCStreamQueryResult(final ResultSet resultSet, final DatabaseType storageType, final boolean containsJDBCResultSet) throws SQLException {
-        this(resultSet, containsJDBCResultSet);
+        this(resultSet, storageType, containsJDBCResultSet, Collections.emptySet());
+    }
+    
+    @HighFrequencyInvocation
+    public JDBCStreamQueryResult(final ResultSet resultSet, final DatabaseType storageType, final boolean containsJDBCResultSet, final Collection<Integer> integerColumnIndexes) throws SQLException {
+        this(resultSet, containsJDBCResultSet, integerColumnIndexes);
         timeValueReader = DatabaseTypedSPILoader.findService(DialectResultSetMapper.class, storageType).flatMap(DialectResultSetMapper::createTimeValueReader).orElse(null);
     }
     
@@ -160,6 +175,10 @@ public final class JDBCStreamQueryResult extends AbstractStreamQueryResult {
      * @throws SQLException SQL exception
      */
     private Object getObjectValue(final int columnIndex, final Class<?> type) throws SQLException {
+        if (Object.class == type && integerColumnIndexes.contains(columnIndex)) {
+            int result = resultSet.getInt(columnIndex);
+            return resultSet.wasNull() ? null : result;
+        }
         if (Object.class == type && null != timeValueReader && Types.TIME == getMetaData().getColumnType(columnIndex)) {
             return timeValueReader.read(resultSet, columnIndex);
         }

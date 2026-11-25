@@ -302,10 +302,10 @@ class ProxySQLExecutorTest {
                             assertThat(statementOption.isReturnGeneratedKeys(), is(isReturnGeneratedKeys));
                             when(mock.prepare(anyString(), eq(executionContext), anyCollection(), any(ExecutionGroupReportContext.class))).thenReturn(jdbcExecutionGroupContext);
                         })) {
-            when(regularExecutor.execute(any(), eq(jdbcExecutionGroupContext), eq(isReturnGeneratedKeys), anyBoolean())).thenReturn(expected);
+            when(regularExecutor.execute(any(), eq(jdbcExecutionGroupContext), eq(isReturnGeneratedKeys), anyBoolean(), eq(true))).thenReturn(expected);
             assertThat(proxySQLExecutor.execute(executionContext), is(expected));
         }
-        verify(regularExecutor).execute(any(), eq(jdbcExecutionGroupContext), eq(isReturnGeneratedKeys), anyBoolean());
+        verify(regularExecutor).execute(any(), eq(jdbcExecutionGroupContext), eq(isReturnGeneratedKeys), anyBoolean(), eq(true));
         if (expectedHookInvoked) {
             verify(transactionHook).beforeExecuteSQL(eq(shardingSphereRule), eq(fixtureDatabaseType), anyCollection(), eq(transactionConnectionContext), eq(TransactionIsolationLevel.READ_COMMITTED));
         } else {
@@ -331,6 +331,35 @@ class ProxySQLExecutorTest {
                 Arguments.of("execute-with-driver-and-no-transaction", false, createInsertStatement(postgresqlDatabaseType), false, false, false));
     }
     
+    @ParameterizedTest(name = "engine enabled: {0}, replacement enabled: {1}")
+    @MethodSource("getYearReadPolicies")
+    void assertExecuteWithStableYearPolicy(final boolean federationEnabled, final boolean replacementEnabled) throws SQLException {
+        when(connectionSession.getUsedDatabaseName()).thenReturn("foo_db");
+        ProxySQLExecutor executor = createProxySQLExecutor("foo_schema", true);
+        SQLFederationEngine federationEngine = mock(SQLFederationEngine.class);
+        when(federationEngine.isSQLFederationEnabled()).thenReturn(federationEnabled);
+        setExecutorField(executor, "sqlFederationEngine", federationEngine);
+        setExecutorField(executor, "regularExecutor", regularExecutor);
+        SQLFederationRule replacement = mock(SQLFederationRule.class);
+        when(replacement.isSqlFederationEnabled()).thenReturn(replacementEnabled);
+        metaData.getGlobalRuleMetaData().getRules().clear();
+        metaData.getGlobalRuleMetaData().getRules().add(replacement);
+        ExecutionContext executionContext = createExecutionContext("foo_year_policy", createCreateTableStatement(mysqlDatabaseType), false);
+        ExecutionGroupContext<JDBCExecutionUnit> executionGroupContext = mock(ExecutionGroupContext.class);
+        List<ExecuteResult> expected = Collections.singletonList(mock(ExecuteResult.class));
+        try (
+                MockedConstruction<DriverExecutionPrepareEngine> ignored = mockConstruction(DriverExecutionPrepareEngine.class,
+                        (mock, context) -> when(mock.prepare(anyString(), eq(executionContext), anyCollection(), any(ExecutionGroupReportContext.class))).thenReturn(executionGroupContext))) {
+            when(regularExecutor.execute(any(), eq(executionGroupContext), eq(false), anyBoolean(), eq(!federationEnabled))).thenReturn(expected);
+            assertThat(executor.execute(executionContext), is(expected));
+        }
+        verify(regularExecutor).execute(any(), eq(executionGroupContext), eq(false), anyBoolean(), eq(!federationEnabled));
+    }
+    
+    private static Stream<Arguments> getYearReadPolicies() {
+        return Stream.of(Arguments.of(false, false), Arguments.of(false, true), Arguments.of(true, false), Arguments.of(true, true));
+    }
+    
     @Test
     void assertExecuteWithDialectResultMetadataCheckerException() throws SQLException {
         when(connectionSession.getUsedDatabaseName()).thenReturn("foo_db");
@@ -354,7 +383,7 @@ class ProxySQLExecutorTest {
                 MockedStatic<DatabaseTypedSPILoader> spiLoader = mockStatic(DatabaseTypedSPILoader.class, CALLS_REAL_METHODS)) {
             spiLoader.when(() -> DatabaseTypedSPILoader.findService(DialectJDBCResultMetadataChecker.class, fixtureDatabaseType)).thenReturn(Optional.of(checker));
             assertThat(assertThrows(SQLException.class, () -> proxySQLExecutor.execute(executionContext)), is(expected));
-            verify(regularExecutor, never()).execute(any(), any(), anyBoolean(), anyBoolean());
+            verify(regularExecutor, never()).execute(any(), any(), anyBoolean(), anyBoolean(), anyBoolean());
         }
     }
     

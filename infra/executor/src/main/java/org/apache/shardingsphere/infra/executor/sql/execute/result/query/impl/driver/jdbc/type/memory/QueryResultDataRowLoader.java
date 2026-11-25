@@ -27,6 +27,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 
@@ -48,21 +49,36 @@ public final class QueryResultDataRowLoader {
      */
     @HighFrequencyInvocation
     public Collection<MemoryQueryResultDataRow> load(final int columnCount, final ResultSet resultSet) throws SQLException {
+        return load(columnCount, resultSet, Collections.emptySet());
+    }
+    
+    /**
+     * Load query result data row.
+     *
+     * @param columnCount column count
+     * @param resultSet result set
+     * @param integerColumnIndexes integer column indexes
+     * @return query result data row
+     * @throws SQLException SQL exception
+     */
+    @HighFrequencyInvocation
+    public Collection<MemoryQueryResultDataRow> load(final int columnCount, final ResultSet resultSet, final Collection<Integer> integerColumnIndexes) throws SQLException {
         Collection<MemoryQueryResultDataRow> result = new LinkedList<>();
         if (!resultSet.next()) {
             return result;
         }
         ResultSetMapper resultSetMapper = new ResultSetMapper(databaseType);
         do {
-            result.add(loadRow(columnCount, resultSet, resultSetMapper));
+            result.add(loadRow(columnCount, resultSet, resultSetMapper, integerColumnIndexes));
         } while (resultSet.next());
         return result;
     }
     
-    private MemoryQueryResultDataRow loadRow(final int columnCount, final ResultSet resultSet, final ResultSetMapper resultSetMapper) throws SQLException {
+    private MemoryQueryResultDataRow loadRow(final int columnCount, final ResultSet resultSet, final ResultSetMapper resultSetMapper,
+                                             final Collection<Integer> integerColumnIndexes) throws SQLException {
         List<Object> rowData = new ArrayList<>(columnCount);
         for (int columnIndex = 1; columnIndex <= columnCount; columnIndex++) {
-            Object rowValue = resultSetMapper.load(resultSet, columnIndex);
+            Object rowValue = integerColumnIndexes.contains(columnIndex) ? resultSet.getInt(columnIndex) : resultSetMapper.load(resultSet, columnIndex);
             rowData.add(resultSet.wasNull() ? null : rowValue);
         }
         return new MemoryQueryResultDataRow(rowData);

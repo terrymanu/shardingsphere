@@ -20,6 +20,7 @@ package org.apache.shardingsphere.infra.executor.sql.execute.result.query.impl.d
 import org.apache.shardingsphere.database.connector.core.resultset.ResultSetMapper;
 import org.apache.shardingsphere.database.connector.core.type.DatabaseType;
 import org.apache.shardingsphere.infra.executor.sql.execute.result.query.type.memory.row.MemoryQueryResultDataRow;
+import org.apache.shardingsphere.infra.spi.type.typed.TypedSPILoader;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedConstruction;
 
@@ -66,5 +67,15 @@ class QueryResultDataRowLoaderTest {
             assertThat(actualRows.next().getValue(), is(Arrays.asList("foo_second", "foo_value")));
             assertThat(mocked.constructed().size(), is(1));
         }
+    }
+    
+    @Test
+    void assertLoadWithIntegerColumns() throws SQLException {
+        when(resultSet.next()).thenReturn(true, false);
+        when(resultSet.getInt(3)).thenReturn(2000);
+        when(resultSet.wasNull()).thenReturn(true, false, false, true);
+        DatabaseType storageType = TypedSPILoader.getService(DatabaseType.class, "FIXTURE");
+        Collection<MemoryQueryResultDataRow> actual = new QueryResultDataRowLoader(storageType).load(4, resultSet, Arrays.asList(1, 2, 3, 4));
+        assertThat(actual.iterator().next().getValue(), is(Arrays.asList(null, 0, 2000, null)));
     }
 }

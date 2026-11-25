@@ -61,11 +61,15 @@ import org.apache.shardingsphere.sql.parser.statement.core.statement.type.dml.In
 import org.apache.shardingsphere.sql.parser.statement.core.statement.type.dml.SelectStatement;
 import org.apache.shardingsphere.sql.parser.statement.core.statement.type.dml.UpdateStatement;
 import org.apache.shardingsphere.sql.parser.statement.core.value.identifier.IdentifierValue;
+import org.apache.shardingsphere.sqlfederation.rule.SQLFederationRule;
 import org.apache.shardingsphere.test.infra.framework.extension.mock.AutoMockExtension;
 import org.apache.shardingsphere.test.infra.framework.extension.mock.StaticMockSettings;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Answers;
 import org.mockito.Mock;
 import org.mockito.MockedConstruction;
@@ -75,12 +79,16 @@ import org.mockito.quality.Strictness;
 import java.nio.charset.StandardCharsets;
 import java.sql.PreparedStatement;
 import java.sql.ResultSetMetaData;
+import java.sql.SQLException;
 import java.sql.Types;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.stream.Stream;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
@@ -92,6 +100,8 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockConstruction;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(AutoMockExtension.class)
@@ -182,6 +192,118 @@ class MySQLComStmtPrepareExecutorTest {
         assertThat(getColumnDefinitionCharacterSet(actual), is(MySQLCharacterSets.UTF8MB4_UNICODE_CI.getId()));
         assertThat(getColumnDefinitionType(actual), is(MySQLBinaryColumnType.BLOB.getValue()));
         assertThat(getColumnDefinitionFlag(actual), is(MySQLColumnDefinitionFlag.BLOB.getValue()));
+    }
+    
+    @ParameterizedTest(name = "{0}: {1}, enabled={3}")
+    @MethodSource("dateProjectionTypes")
+    void assertPrepareDateProjection(final String columnName, final int jdbcType, final String columnTypeName, final boolean sqlFederationEnabled,
+                                     final MySQLBinaryColumnType expectedColumnType, final int expectedFlags, final int expectedMetadataReads) throws SQLException {
+        when(packet.getSQL()).thenReturn("SELECT " + columnName + " FROM foo_db.user WHERE id = ?");
+        when(packet.getHintValueContext()).thenReturn(new HintValueContext());
+        int connectionId = 7;
+        when(connectionSession.getConnectionId()).thenReturn(connectionId);
+        when(connectionSession.getCurrentDatabaseName()).thenReturn("foo_db");
+        MySQLStatementIdGenerator.getInstance().registerConnection(connectionId);
+        try {
+            ContextManager contextManager = mockContextManager();
+            when(ProxyContext.getInstance().getContextManager()).thenReturn(contextManager);
+            SQLFederationRule sqlFederationRule = contextManager.getMetaDataContexts().getMetaData().getGlobalRuleMetaData().getSingleRule(SQLFederationRule.class);
+            when(sqlFederationRule.isSqlFederationEnabled()).thenReturn(sqlFederationEnabled);
+            PreparedStatement preparedStatement = mock(PreparedStatement.class);
+            ResultSetMetaData resultSetMetaData = mock(ResultSetMetaData.class);
+            when(preparedStatement.getMetaData()).thenReturn(resultSetMetaData);
+            when(resultSetMetaData.getColumnCount()).thenReturn(1);
+            when(resultSetMetaData.getColumnName(1)).thenReturn(columnName);
+            when(resultSetMetaData.getColumnLabel(1)).thenReturn(columnName);
+            when(resultSetMetaData.getColumnType(1)).thenReturn(jdbcType);
+            when(resultSetMetaData.getColumnTypeName(1)).thenReturn(columnTypeName);
+            when(resultSetMetaData.isNullable(1)).thenReturn(ResultSetMetaData.columnNullable);
+            when(resultSetMetaData.getTableName(1)).thenReturn("");
+            when(MySQLPreparedStatementMetadataFactory.load(eq(connectionSession), any(MySQLServerPreparedStatement.class))).thenReturn(preparedStatement);
+            List<DatabasePacket> actual = new ArrayList<>(new MySQLComStmtPrepareExecutor(packet, connectionSession).execute());
+            assertThat(actual.size(), is(5));
+            assertThat(getColumnDefinitionType((MySQLColumnDefinition41Packet) actual.get(1)), is(MySQLBinaryColumnType.LONGLONG.getValue()));
+            assertThat(getColumnDefinitionType((MySQLColumnDefinition41Packet) actual.get(3)), is(expectedColumnType.getValue()));
+            assertThat(getColumnDefinitionFlag((MySQLColumnDefinition41Packet) actual.get(3)), is(expectedFlags));
+            verify(preparedStatement, times(expectedMetadataReads)).close();
+        } finally {
+            MySQLStatementIdGenerator.getInstance().unregisterConnection(connectionId);
+        }
+    }
+    
+    private static Stream<Arguments> dateProjectionTypes() {
+        return Stream.of(
+                Arguments.of("year_value", Types.DATE, "YEAR", false, MySQLBinaryColumnType.YEAR, MySQLColumnDefinitionFlag.UNSIGNED.getValue(), 1),
+                Arguments.of("year_value", Types.SMALLINT, "YEAR", false, MySQLBinaryColumnType.YEAR, MySQLColumnDefinitionFlag.UNSIGNED.getValue(), 1),
+                Arguments.of("date_value", Types.DATE, "DATE", false, MySQLBinaryColumnType.DATE, 0, 1),
+                Arguments.of("date_value", Types.VARCHAR, "VARCHAR", false, MySQLBinaryColumnType.DATE, 0, 1),
+                Arguments.of("year_value", Types.DATE, "YEAR", true, MySQLBinaryColumnType.DATE, 0, 0),
+                Arguments.of("year_value", Types.SMALLINT, "YEAR", true, MySQLBinaryColumnType.DATE, 0, 0),
+                Arguments.of("date_value", Types.DATE, "DATE", true, MySQLBinaryColumnType.DATE, 0, 0));
+    }
+    
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("metadataFailures")
+    void assertPrepareDateProjectionWithoutMetadata(final String failure) throws SQLException {
+        when(packet.getSQL()).thenReturn("SELECT year_value, date_value FROM foo_db.user");
+        when(packet.getHintValueContext()).thenReturn(new HintValueContext());
+        int connectionId = 7;
+        when(connectionSession.getConnectionId()).thenReturn(connectionId);
+        when(connectionSession.getCurrentDatabaseName()).thenReturn("foo_db");
+        MySQLStatementIdGenerator.getInstance().registerConnection(connectionId);
+        try {
+            ContextManager contextManager = mockContextManager();
+            when(ProxyContext.getInstance().getContextManager()).thenReturn(contextManager);
+            PreparedStatement preparedStatement = mock(PreparedStatement.class);
+            if ("metadata failure".equals(failure)) {
+                when(preparedStatement.getMetaData()).thenThrow(SQLException.class);
+            } else if ("later column failure".equals(failure)) {
+                ResultSetMetaData resultSetMetaData = mock(ResultSetMetaData.class);
+                when(preparedStatement.getMetaData()).thenReturn(resultSetMetaData);
+                when(resultSetMetaData.getColumnCount()).thenReturn(2);
+                when(resultSetMetaData.getColumnTypeName(1)).thenReturn("YEAR");
+                when(resultSetMetaData.getColumnType(1)).thenReturn(Types.DATE);
+                when(resultSetMetaData.getColumnName(1)).thenReturn("year_value");
+                when(resultSetMetaData.getColumnLabel(1)).thenReturn("year_value");
+                when(resultSetMetaData.getTableName(1)).thenReturn("");
+                when(resultSetMetaData.getColumnTypeName(2)).thenThrow(SQLException.class);
+            }
+            when(MySQLPreparedStatementMetadataFactory.load(eq(connectionSession), any(MySQLServerPreparedStatement.class))).thenReturn(preparedStatement);
+            List<DatabasePacket> actual = new ArrayList<>(new MySQLComStmtPrepareExecutor(packet, connectionSession).execute());
+            assertThat(actual.size(), is(4));
+            assertThat(getColumnDefinitionType((MySQLColumnDefinition41Packet) actual.get(1)), is(MySQLBinaryColumnType.DATE.getValue()));
+            assertThat(getColumnDefinitionFlag((MySQLColumnDefinition41Packet) actual.get(1)), is(0));
+            assertThat(getColumnDefinitionType((MySQLColumnDefinition41Packet) actual.get(2)), is(MySQLBinaryColumnType.DATE.getValue()));
+            assertThat(getColumnDefinitionFlag((MySQLColumnDefinition41Packet) actual.get(2)), is(0));
+            verify(preparedStatement).close();
+        } finally {
+            MySQLStatementIdGenerator.getInstance().unregisterConnection(connectionId);
+        }
+    }
+    
+    private static Stream<Arguments> metadataFailures() {
+        return Stream.of(Arguments.of("null metadata"), Arguments.of("metadata failure"), Arguments.of("later column failure"));
+    }
+    
+    @Test
+    void assertPrepareSelectExpressionWithoutMetadata() throws SQLException {
+        when(packet.getSQL()).thenReturn("SELECT ~id AS bitwise_not FROM foo_db.user");
+        when(packet.getHintValueContext()).thenReturn(new HintValueContext());
+        int connectionId = 8;
+        when(connectionSession.getConnectionId()).thenReturn(connectionId);
+        when(connectionSession.getCurrentDatabaseName()).thenReturn("foo_db");
+        MySQLStatementIdGenerator.getInstance().registerConnection(connectionId);
+        try {
+            ContextManager contextManager = mockContextManager();
+            when(ProxyContext.getInstance().getContextManager()).thenReturn(contextManager);
+            when(MySQLPreparedStatementMetadataFactory.load(eq(connectionSession), any(MySQLServerPreparedStatement.class))).thenThrow(SQLException.class);
+            List<DatabasePacket> actual = new ArrayList<>(new MySQLComStmtPrepareExecutor(packet, connectionSession).execute());
+            assertThat(actual.size(), is(3));
+            assertThat(getColumnDefinitionType((MySQLColumnDefinition41Packet) actual.get(1)), is(MySQLBinaryColumnType.VAR_STRING.getValue()));
+            assertThat(getColumnDefinitionFlag((MySQLColumnDefinition41Packet) actual.get(1)), is(0));
+        } finally {
+            MySQLStatementIdGenerator.getInstance().unregisterConnection(connectionId);
+        }
     }
     
     @Test
@@ -470,6 +592,7 @@ class MySQLComStmtPrepareExecutorTest {
         CacheOption cacheOption = new CacheOption(1024, 1024L);
         when(result.getMetaDataContexts().getMetaData().getGlobalRuleMetaData().getSingleRule(SQLParserRule.class))
                 .thenReturn(new SQLParserRule(new SQLParserRuleConfiguration(cacheOption, cacheOption)));
+        when(result.getMetaDataContexts().getMetaData().getGlobalRuleMetaData().getSingleRule(SQLFederationRule.class)).thenReturn(mock(SQLFederationRule.class, RETURNS_DEEP_STUBS));
         ShardingSphereDatabase database = createDatabase();
         when(result.getMetaDataContexts().getMetaData().getDatabase("foo_db")).thenReturn(database);
         when(result.getMetaDataContexts().getMetaData().getDatabase(new IdentifierValue("foo_db"))).thenReturn(database);
@@ -482,6 +605,8 @@ class MySQLComStmtPrepareExecutorTest {
         ShardingSphereTable table = new ShardingSphereTable("user", Arrays.asList(new ShardingSphereColumn("id", Types.BIGINT, true, false, false, false, true, false),
                 new ShardingSphereColumn("name", Types.VARCHAR, false, false, false, false, false, false),
                 new ShardingSphereColumn("age", Types.SMALLINT, false, false, false, false, true, false),
+                new ShardingSphereColumn("year_value", Types.DATE, false, false, false, false, false, false),
+                new ShardingSphereColumn("date_value", Types.DATE, false, false, false, false, false, false),
                 new ShardingSphereColumn("content", Types.CLOB, false, false, false, false, false, true),
                 new ShardingSphereColumn("national_content", Types.NCLOB, false, false, false, false, false, true)), Collections.emptyList(), Collections.emptyList());
         ShardingSphereSchema schema = new ShardingSphereSchema("foo_db", databaseType, Collections.singleton(table), Collections.emptyList());

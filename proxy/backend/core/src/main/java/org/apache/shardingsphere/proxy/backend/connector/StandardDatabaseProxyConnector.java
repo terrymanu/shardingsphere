@@ -25,6 +25,7 @@ import org.apache.shardingsphere.database.connector.core.type.DatabaseTypeRegist
 import org.apache.shardingsphere.database.exception.core.SQLExceptionTransformEngine;
 import org.apache.shardingsphere.driver.jdbc.core.resultset.ShardingSphereResultSetMetaData;
 import org.apache.shardingsphere.driver.jdbc.core.resultset.ShardingSphereResultSetUtils;
+import org.apache.shardingsphere.infra.annotation.HighFrequencyInvocation;
 import org.apache.shardingsphere.infra.binder.context.segment.insert.keygen.GeneratedKeyContext;
 import org.apache.shardingsphere.infra.binder.context.statement.SQLStatementContext;
 import org.apache.shardingsphere.infra.binder.context.statement.type.ddl.CursorHeldSQLStatementContext;
@@ -42,6 +43,7 @@ import org.apache.shardingsphere.infra.executor.sql.execute.engine.SQLExecutorEx
 import org.apache.shardingsphere.infra.executor.sql.execute.engine.driver.jdbc.JDBCExecutionUnit;
 import org.apache.shardingsphere.infra.executor.sql.execute.result.ExecuteResult;
 import org.apache.shardingsphere.infra.executor.sql.execute.result.query.QueryResult;
+import org.apache.shardingsphere.infra.executor.sql.execute.result.query.impl.driver.jdbc.type.memory.JDBCMemoryQueryResult;
 import org.apache.shardingsphere.infra.executor.sql.execute.result.query.impl.driver.jdbc.type.stream.JDBCStreamQueryResult;
 import org.apache.shardingsphere.infra.executor.sql.execute.result.update.UpdateResult;
 import org.apache.shardingsphere.infra.executor.sql.prepare.driver.DriverExecutionPrepareEngine;
@@ -54,6 +56,7 @@ import org.apache.shardingsphere.infra.metadata.ShardingSphereMetaData;
 import org.apache.shardingsphere.infra.metadata.database.ShardingSphereDatabase;
 import org.apache.shardingsphere.infra.metadata.database.schema.util.SystemSchemaUtils;
 import org.apache.shardingsphere.infra.rule.attribute.datanode.DataNodeRuleAttribute;
+import org.apache.shardingsphere.infra.rule.attribute.raw.RawExecutionRuleAttribute;
 import org.apache.shardingsphere.infra.session.connection.cursor.CursorConnectionContext;
 import org.apache.shardingsphere.infra.session.query.QueryContext;
 import org.apache.shardingsphere.infra.spi.ShardingSphereServiceLoader;
@@ -91,6 +94,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.sql.Types;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -252,7 +256,8 @@ public final class StandardDatabaseProxyConnector implements DatabaseProxyConnec
         }
         Object executeResultSample = executeResults.iterator().next();
         return executeResultSample instanceof QueryResult
-                ? processExecuteQuery(queryContext.getSqlStatementContext(), executeResults.stream().map(QueryResult.class::cast).collect(Collectors.toList()), (QueryResult) executeResultSample)
+                ? processExecuteQuery(queryContext.getSqlStatementContext(), executeResults.stream().map(QueryResult.class::cast).collect(Collectors.toList()), (QueryResult) executeResultSample,
+                        advancedExecutors.isEmpty() && database.getRuleMetaData().getAttributes(RawExecutionRuleAttribute.class).isEmpty())
                 : processExecuteUpdate(executeResults.stream().map(UpdateResult.class::cast).collect(Collectors.toList()));
     }
     
@@ -294,22 +299,27 @@ public final class StandardDatabaseProxyConnector implements DatabaseProxyConnec
         return new QueryResponseHeader(queryHeaders);
     }
     
-    private QueryResponseHeader processExecuteQuery(final SQLStatementContext sqlStatementContext, final List<QueryResult> queryResults, final QueryResult queryResultSample) throws SQLException {
-        queryHeaders = createQueryHeaders(sqlStatementContext, queryResultSample);
+    private QueryResponseHeader processExecuteQuery(final SQLStatementContext sqlStatementContext, final List<QueryResult> queryResults,
+                                                    final QueryResult queryResultSample, final boolean standardExecutor) throws SQLException {
+        queryHeaders = createQueryHeaders(sqlStatementContext, queryResultSample, standardExecutor);
         mergedResult = mergeQuery(queryResults);
         return new QueryResponseHeader(queryHeaders);
     }
     
-    private List<QueryHeader> createQueryHeaders(final SQLStatementContext sqlStatementContext, final QueryResult queryResultSample) throws SQLException {
+    private List<QueryHeader> createQueryHeaders(final SQLStatementContext sqlStatementContext, final QueryResult queryResultSample, final boolean standardExecutor) throws SQLException {
         int columnCount = getColumnCount(sqlStatementContext, queryResultSample);
         List<QueryHeader> result = new ArrayList<>(columnCount);
         QueryHeaderBuilderEngine queryHeaderBuilderEngine = new QueryHeaderBuilderEngine(database.getProtocolType());
         ShardingSphereResultSetMetaData resultSetMetaData = new ShardingSphereResultSetMetaData(queryResultSample.getMetaData().getResultSetMetaData(), database, sqlStatementContext);
         Optional<ResultSet> resultSetSample = cachedResultSets.stream().findFirst();
+        boolean jdbcQueryResult = queryResultSample instanceof JDBCStreamQueryResult || queryResultSample instanceof JDBCMemoryQueryResult;
+        boolean readYearAsInteger = standardExecutor && !proxySQLExecutor.getSqlFederationEngine().isSQLFederationEnabled() && jdbcQueryResult
+                && "MySQL".equals(database.getProtocolType().getTrunkDatabaseType().orElse(database.getProtocolType()).getType());
         for (int columnIndex = 1; columnIndex <= columnCount; columnIndex++) {
-            result.add(resultSetSample.isPresent()
+            QueryHeader queryHeader = resultSetSample.isPresent()
                     ? queryHeaderBuilderEngine.build(sqlStatementContext, resultSetMetaData, resultSetSample.get(), database, columnIndex)
-                    : queryHeaderBuilderEngine.build(sqlStatementContext, resultSetMetaData, database, columnIndex));
+                    : queryHeaderBuilderEngine.build(sqlStatementContext, resultSetMetaData, database, columnIndex);
+            result.add(readYearAsInteger && "YEAR".equalsIgnoreCase(queryHeader.getColumnTypeName()) ? createIntegerYearQueryHeader(queryHeader) : queryHeader);
         }
         return result;
     }
@@ -318,6 +328,15 @@ public final class StandardDatabaseProxyConnector implements DatabaseProxyConnec
         return containsDerivedProjections
                 ? ShardingSphereResultSetUtils.getVisibleColumnCount((SelectStatementContext) sqlStatementContext, queryResultSample.getMetaData().getResultSetMetaData())
                 : queryResultSample.getMetaData().getColumnCount();
+    }
+    
+    @HighFrequencyInvocation
+    private QueryHeader createIntegerYearQueryHeader(final QueryHeader queryHeader) {
+        QueryHeader result = new QueryHeader(queryHeader.getSchema(), queryHeader.getTable(), queryHeader.getColumnLabel(), queryHeader.getColumnName(), Types.INTEGER,
+                queryHeader.getColumnTypeName(), queryHeader.getColumnLength(), queryHeader.getDecimals(), queryHeader.isSigned(), queryHeader.isPrimaryKey(), queryHeader.isNotNull(),
+                queryHeader.isAutoIncrement());
+        result.getProtocolAttributes().putAll(queryHeader.getProtocolAttributes());
+        return result;
     }
     
     private MergedResult mergeQuery(final List<QueryResult> queryResults) throws SQLException {

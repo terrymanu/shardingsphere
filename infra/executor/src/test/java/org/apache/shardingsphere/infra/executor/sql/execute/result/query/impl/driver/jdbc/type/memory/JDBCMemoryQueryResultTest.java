@@ -43,6 +43,7 @@ import java.sql.SQLXML;
 import java.sql.Time;
 import java.sql.Timestamp;
 import java.sql.Types;
+import java.util.Arrays;
 import java.util.Calendar;
 
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -73,6 +74,42 @@ class JDBCMemoryQueryResultTest {
         JDBCMemoryQueryResult queryResult = new JDBCMemoryQueryResult(mockResultSet(), databaseType);
         assertTrue(queryResult.next());
         assertFalse(queryResult.next());
+    }
+    
+    @Test
+    void assertConstructorWithIntegerColumns() throws SQLException {
+        ResultSet resultSet = mock(ResultSet.class);
+        ResultSetMetaData metaData = mock(ResultSetMetaData.class);
+        when(resultSet.getMetaData()).thenReturn(metaData);
+        when(metaData.getColumnCount()).thenReturn(3);
+        when(resultSet.next()).thenReturn(true, false);
+        when(resultSet.getInt(2)).thenReturn(2000);
+        when(resultSet.wasNull()).thenReturn(false, false, true);
+        JDBCMemoryQueryResult actual = new JDBCMemoryQueryResult(resultSet, databaseType, false, Arrays.asList(1, 2, 3));
+        assertTrue(actual.next());
+        assertThat(actual.getValue(1, Object.class), is(0));
+        assertThat(actual.getValue(2, Object.class), is(2000));
+        assertNull(actual.getValue(3, Object.class));
+        assertTrue(actual.wasNull());
+        assertFalse(actual.getJDBCResultSet().isPresent());
+    }
+    
+    @Test
+    void assertConstructorWithoutIntegerColumns() throws SQLException {
+        ResultSet resultSet = getMockedResultSet(Types.DATE);
+        Date expected = Date.valueOf("2000-01-01");
+        when(resultSet.getDate(1)).thenReturn(expected);
+        JDBCMemoryQueryResult actual = new JDBCMemoryQueryResult(resultSet, databaseType);
+        assertTrue(actual.next());
+        assertThat(actual.getValue(1, Object.class), sameInstance(expected));
+        assertFalse(actual.getJDBCResultSet().isPresent());
+    }
+    
+    @Test
+    void assertConstructorWithJDBCResultSet() throws SQLException {
+        ResultSet resultSet = mockResultSet();
+        JDBCMemoryQueryResult actual = new JDBCMemoryQueryResult(resultSet, databaseType, true);
+        assertThat(actual.getJDBCResultSet().orElseThrow(IllegalStateException::new), sameInstance(resultSet));
     }
     
     @Test

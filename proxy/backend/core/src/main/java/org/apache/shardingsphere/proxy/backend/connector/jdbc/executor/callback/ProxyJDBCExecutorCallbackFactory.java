@@ -51,11 +51,34 @@ public final class ProxyJDBCExecutorCallbackFactory {
     public static ProxyJDBCExecutorCallback newInstance(final JDBCDriverType type, final DatabaseType protocolType, final ResourceMetaData resourceMetaData, final SQLStatement sqlStatement,
                                                         final DatabaseProxyConnector databaseProxyConnector, final boolean isReturnGeneratedKeys, final boolean isExceptionThrown,
                                                         final boolean isFetchMetaData) {
+        return newInstance(type, protocolType, resourceMetaData, sqlStatement, databaseProxyConnector, isReturnGeneratedKeys, isExceptionThrown, isFetchMetaData, false);
+    }
+    
+    /**
+     * Create new instance of Proxy JDBC executor callback.
+     *
+     * @param type driver type
+     * @param protocolType protocol type
+     * @param resourceMetaData resource meta data
+     * @param sqlStatement SQL statement
+     * @param databaseProxyConnector database proxy connector
+     * @param isReturnGeneratedKeys is return generated keys or not
+     * @param isExceptionThrown is exception thrown or not
+     * @param isFetchMetaData is fetch meta data or not
+     * @param readYearAsInteger whether to read native YEAR columns as integers
+     * @return created instance
+     * @throws UnsupportedSQLOperationException unsupported SQL operation exception
+     */
+    public static ProxyJDBCExecutorCallback newInstance(final JDBCDriverType type, final DatabaseType protocolType, final ResourceMetaData resourceMetaData, final SQLStatement sqlStatement,
+                                                        final DatabaseProxyConnector databaseProxyConnector, final boolean isReturnGeneratedKeys, final boolean isExceptionThrown,
+                                                        final boolean isFetchMetaData, final boolean readYearAsInteger) {
         if (JDBCDriverType.STATEMENT == type) {
-            return new ProxyStatementExecutorCallback(protocolType, resourceMetaData, sqlStatement, databaseProxyConnector, isReturnGeneratedKeys, isExceptionThrown, isFetchMetaData);
+            return new ProxyStatementExecutorCallback(protocolType, resourceMetaData, sqlStatement, databaseProxyConnector, isReturnGeneratedKeys, isExceptionThrown, isFetchMetaData,
+                    readYearAsInteger);
         }
         if (JDBCDriverType.PREPARED_STATEMENT == type) {
-            return new ProxyPreparedStatementExecutorCallback(protocolType, resourceMetaData, sqlStatement, databaseProxyConnector, isReturnGeneratedKeys, isExceptionThrown, isFetchMetaData);
+            return new ProxyPreparedStatementExecutorCallback(protocolType, resourceMetaData, sqlStatement, databaseProxyConnector, isReturnGeneratedKeys, isExceptionThrown, isFetchMetaData,
+                    readYearAsInteger);
         }
         throw new UnsupportedSQLOperationException(String.format("Unsupported driver type: `%s`", type));
     }

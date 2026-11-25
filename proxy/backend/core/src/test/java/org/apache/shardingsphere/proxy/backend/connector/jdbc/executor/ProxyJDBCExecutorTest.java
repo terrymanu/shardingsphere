@@ -38,12 +38,16 @@ import org.apache.shardingsphere.proxy.backend.context.ProxyContext;
 import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
 import org.apache.shardingsphere.sql.parser.statement.core.statement.SQLStatement;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.MockedStatic;
 import org.mockito.internal.configuration.plugins.Plugins;
 
 import java.sql.SQLException;
 import java.util.Collections;
 import java.util.List;
+import java.util.stream.Stream;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
@@ -60,17 +64,13 @@ import static org.mockito.Mockito.when;
 
 class ProxyJDBCExecutorTest {
     
-    @Test
-    void assertExecuteWithCallbacks() throws SQLException, ReflectiveOperationException {
+    @ParameterizedTest(name = "{0}, integer YEAR: {1}")
+    @MethodSource("getCallbackSelections")
+    void assertExecuteWithCallbacks(final JDBCDriverType type, final boolean readYearAsInteger) throws SQLException, ReflectiveOperationException {
         Object originalContextManager = Plugins.getMemberAccessor().get(ProxyContext.class.getDeclaredField("contextManager"), ProxyContext.getInstance());
-        assertExecuteWithCallbacks(originalContextManager);
-    }
-    
-    private void assertExecuteWithCallbacks(final Object originalContextManager) throws SQLException, ReflectiveOperationException {
         ContextManager contextManager = mock(ContextManager.class, RETURNS_DEEP_STUBS);
         try {
             ProxyContext.init(contextManager);
-            JDBCDriverType type = JDBCDriverType.STATEMENT;
             ConnectionSession connectionSession = mock(ConnectionSession.class);
             when(connectionSession.getUsedDatabaseName()).thenReturn("logic_db");
             DatabaseProxyConnector databaseProxyConnector = mock(DatabaseProxyConnector.class);
@@ -85,19 +85,29 @@ class ProxyJDBCExecutorTest {
             try (MockedStatic<ProxyJDBCExecutorCallbackFactory> mockedStatic = mockStatic(ProxyJDBCExecutorCallbackFactory.class)) {
                 ResourceMetaData resourceMetaData = contextManager.getDatabase("logic_db").getResourceMetaData();
                 DatabaseType protocolType = contextManager.getDatabase("logic_db").getProtocolType();
-                mockedStatic.when(() -> ProxyJDBCExecutorCallbackFactory.newInstance(type, protocolType, resourceMetaData, sqlStatement, databaseProxyConnector, true, false, true))
-                        .thenReturn(firstCallback);
-                mockedStatic.when(() -> ProxyJDBCExecutorCallbackFactory.newInstance(type, protocolType, resourceMetaData, sqlStatement, databaseProxyConnector, true, false, false))
-                        .thenReturn(secondCallback);
+                mockedStatic.when(() -> ProxyJDBCExecutorCallbackFactory.newInstance(type, protocolType, resourceMetaData, sqlStatement, databaseProxyConnector, true, false, true,
+                        readYearAsInteger)).thenReturn(firstCallback);
+                mockedStatic.when(() -> ProxyJDBCExecutorCallbackFactory.newInstance(type, protocolType, resourceMetaData, sqlStatement, databaseProxyConnector, true, false, false,
+                        readYearAsInteger)).thenReturn(secondCallback);
                 when(jdbcExecutor.execute(executionGroupContext, firstCallback, secondCallback)).thenReturn(expected);
-                assertThat(executor.execute(queryContext, executionGroupContext, true, false), is(expected));
-                mockedStatic.verify(() -> ProxyJDBCExecutorCallbackFactory.newInstance(type, protocolType, resourceMetaData, sqlStatement, databaseProxyConnector, true, false, true));
-                mockedStatic.verify(() -> ProxyJDBCExecutorCallbackFactory.newInstance(type, protocolType, resourceMetaData, sqlStatement, databaseProxyConnector, true, false, false));
+                assertThat(executor.execute(queryContext, executionGroupContext, true, false, readYearAsInteger), is(expected));
+                mockedStatic.verify(() -> ProxyJDBCExecutorCallbackFactory.newInstance(type, protocolType, resourceMetaData, sqlStatement, databaseProxyConnector, true, false, true,
+                        readYearAsInteger));
+                mockedStatic.verify(() -> ProxyJDBCExecutorCallbackFactory.newInstance(type, protocolType, resourceMetaData, sqlStatement, databaseProxyConnector, true, false, false,
+                        readYearAsInteger));
             }
         } finally {
             ProcessRegistry.getInstance().remove("pid");
             Plugins.getMemberAccessor().set(ProxyContext.class.getDeclaredField("contextManager"), ProxyContext.getInstance(), originalContextManager);
         }
+    }
+    
+    private static Stream<Arguments> getCallbackSelections() {
+        return Stream.of(
+                Arguments.of(JDBCDriverType.STATEMENT, false),
+                Arguments.of(JDBCDriverType.STATEMENT, true),
+                Arguments.of(JDBCDriverType.PREPARED_STATEMENT, false),
+                Arguments.of(JDBCDriverType.PREPARED_STATEMENT, true));
     }
     
     @Test
@@ -115,7 +125,7 @@ class ProxyJDBCExecutorTest {
             ProcessEngine processEngine = mock(ProcessEngine.class);
             Plugins.getMemberAccessor().set(ProxyJDBCExecutor.class.getDeclaredField("processEngine"), executor, processEngine);
             ExecutionGroupContext<JDBCExecutionUnit> executionGroupContext = new ExecutionGroupContext<>(Collections.emptyList(), new ExecutionGroupReportContext("foo_pid", "foo_db"));
-            assertThat(assertThrows(UnknownDatabaseException.class, () -> executor.execute(mock(QueryContext.class), executionGroupContext, false, true)), sameInstance(expected));
+            assertThat(assertThrows(UnknownDatabaseException.class, () -> executor.execute(mock(QueryContext.class), executionGroupContext, false, true, false)), sameInstance(expected));
             verify(processEngine).completeSQLExecution("foo_pid");
             verifyNoInteractions(jdbcExecutor);
         } finally {
@@ -139,7 +149,7 @@ class ProxyJDBCExecutorTest {
             SQLException expected = new SQLException("foo execution failure");
             when(jdbcExecutor.execute(eq(executionGroupContext), any(), any())).thenThrow(expected);
             QueryContext queryContext = mockQueryContext(mock(SQLStatement.class));
-            assertThat(assertThrows(SQLException.class, () -> executor.execute(queryContext, executionGroupContext, false, true)), sameInstance(expected));
+            assertThat(assertThrows(SQLException.class, () -> executor.execute(queryContext, executionGroupContext, false, true, false)), sameInstance(expected));
             verify(processEngine).completeSQLExecution("foo_pid");
         } finally {
             Plugins.getMemberAccessor().set(ProxyContext.class.getDeclaredField("contextManager"), ProxyContext.getInstance(), originalContextManager);

@@ -26,6 +26,7 @@ import org.apache.shardingsphere.database.protocol.mysql.packet.command.query.My
 import org.apache.shardingsphere.database.protocol.mysql.packet.command.query.MySQLColumnDefinitionFlag;
 import org.apache.shardingsphere.driver.jdbc.core.resultset.ShardingSphereResultSetMetaData;
 import org.apache.shardingsphere.driver.jdbc.core.resultset.ShardingSphereResultSetUtils;
+import org.apache.shardingsphere.infra.annotation.HighFrequencyInvocation;
 import org.apache.shardingsphere.infra.binder.context.statement.type.dml.SelectStatementContext;
 import org.apache.shardingsphere.infra.metadata.database.ShardingSphereDatabase;
 import org.apache.shardingsphere.proxy.backend.context.ProxyContext;
@@ -33,6 +34,7 @@ import org.apache.shardingsphere.proxy.backend.response.header.query.QueryHeader
 import org.apache.shardingsphere.proxy.backend.response.header.query.QueryHeaderBuilderEngine;
 import org.apache.shardingsphere.proxy.backend.session.ConnectionSession;
 import org.apache.shardingsphere.proxy.frontend.mysql.command.query.binary.MySQLServerPreparedStatement;
+import org.apache.shardingsphere.proxy.frontend.mysql.command.query.builder.ResponsePacketBuilder;
 
 import java.sql.PreparedStatement;
 import java.sql.ResultSetMetaData;
@@ -42,6 +44,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashSet;
+import java.util.List;
 
 /**
  * Projection metadata resolver for MySQL prepared statements.
@@ -62,25 +65,34 @@ public final class MySQLProjectionMetadataResolver {
      * @param preparedStatement prepared statement
      * @param selectStatementContext select statement context
      * @param characterSet character set
+     * @param useNativeYearType whether to preserve native YEAR type
+     * @param localPackets local projection packets, empty if unavailable
      * @return column definition packets
      * @throws SQLException SQL exception
      */
+    @HighFrequencyInvocation
     public static Collection<MySQLPacket> resolveProjectionPackets(final ConnectionSession connectionSession, final MySQLServerPreparedStatement preparedStatement,
-                                                                   final SelectStatementContext selectStatementContext, final int characterSet) throws SQLException {
+                                                                   final SelectStatementContext selectStatementContext, final int characterSet, final boolean useNativeYearType,
+                                                                   final Collection<MySQLPacket> localPackets) throws SQLException {
         try (PreparedStatement actualPreparedStatement = MySQLPreparedStatementMetadataFactory.load(connectionSession, preparedStatement)) {
             ResultSetMetaData actualResultSetMetaData = actualPreparedStatement.getMetaData();
             if (null == actualResultSetMetaData) {
-                return createDefaultPackets(selectStatementContext, characterSet);
+                return localPackets.isEmpty() ? createDefaultPackets(selectStatementContext, characterSet) : localPackets;
             }
             String databaseName = selectStatementContext.getTablesContext().getDatabaseName().orElseGet(connectionSession::getCurrentDatabaseName);
             ShardingSphereDatabase database = ProxyContext.getInstance().getContextManager().getMetaDataContexts().getMetaData().getDatabase(databaseName);
             ShardingSphereResultSetMetaData resultSetMetaData = new ShardingSphereResultSetMetaData(actualResultSetMetaData, database, selectStatementContext);
             QueryHeaderBuilderEngine queryHeaderBuilderEngine = new QueryHeaderBuilderEngine(database.getProtocolType());
             int visibleColumnCount = ShardingSphereResultSetUtils.getVisibleColumnCount(selectStatementContext, actualResultSetMetaData);
-            Collection<MySQLPacket> result = new ArrayList<>(visibleColumnCount);
+            List<MySQLPacket> result = localPackets.isEmpty() ? new ArrayList<>(visibleColumnCount) : new ArrayList<>(localPackets);
             for (int columnIndex = 1; columnIndex <= visibleColumnCount; columnIndex++) {
-                QueryHeader queryHeader = queryHeaderBuilderEngine.build(selectStatementContext, resultSetMetaData, database, columnIndex);
-                result.add(createMySQLColumnDefinition41Packet(queryHeader, characterSet));
+                if (localPackets.isEmpty()) {
+                    QueryHeader queryHeader = queryHeaderBuilderEngine.build(selectStatementContext, resultSetMetaData, database, columnIndex);
+                    result.add(createMySQLColumnDefinition41Packet(queryHeader, characterSet, useNativeYearType));
+                } else if (useNativeYearType && "YEAR".equalsIgnoreCase(actualResultSetMetaData.getColumnTypeName(columnIndex))) {
+                    QueryHeader queryHeader = queryHeaderBuilderEngine.build(selectStatementContext, resultSetMetaData, database, columnIndex);
+                    result.set(columnIndex - 1, createMySQLColumnDefinition41Packet(queryHeader, characterSet, true));
+                }
             }
             return result;
         }
@@ -94,11 +106,12 @@ public final class MySQLProjectionMetadataResolver {
         return result;
     }
     
-    private static MySQLColumnDefinition41Packet createMySQLColumnDefinition41Packet(final QueryHeader queryHeader, final int characterSet) {
+    private static MySQLColumnDefinition41Packet createMySQLColumnDefinition41Packet(final QueryHeader queryHeader, final int characterSet, final boolean useNativeYearType) {
         int actualCharacterSet = BINARY_TYPES.contains(queryHeader.getColumnType()) ? MySQLCharacterSets.BINARY.getId() : characterSet;
+        int jdbcType = useNativeYearType && "YEAR".equalsIgnoreCase(queryHeader.getColumnTypeName()) ? Types.INTEGER : queryHeader.getColumnType();
+        MySQLBinaryColumnType columnType = useNativeYearType ? ResponsePacketBuilder.getColumnType(jdbcType, queryHeader.getColumnTypeName()) : MySQLBinaryColumnType.valueOfJDBCType(jdbcType);
         return new MySQLColumnDefinition41Packet(actualCharacterSet, getColumnDefinitionFlag(queryHeader), queryHeader.getSchema(), queryHeader.getTable(), queryHeader.getTable(),
-                queryHeader.getColumnLabel(), queryHeader.getColumnName(), queryHeader.getColumnLength(), MySQLBinaryColumnType.valueOfJDBCType(queryHeader.getColumnType()),
-                queryHeader.getDecimals(), false);
+                queryHeader.getColumnLabel(), queryHeader.getColumnName(), queryHeader.getColumnLength(), columnType, queryHeader.getDecimals(), false);
     }
     
     private static int getColumnDefinitionFlag(final QueryHeader queryHeader) {

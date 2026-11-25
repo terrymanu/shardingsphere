@@ -17,6 +17,9 @@
 
 package org.apache.shardingsphere.proxy.frontend.mysql.command.query.binary.execute;
 
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufUtil;
+import io.netty.buffer.Unpooled;
 import org.apache.shardingsphere.database.connector.core.type.DatabaseType;
 import org.apache.shardingsphere.database.exception.mysql.exception.UnsupportedPreparedStatementException;
 import org.apache.shardingsphere.database.protocol.mysql.constant.MySQLBinaryColumnType;
@@ -74,6 +77,9 @@ import org.apache.shardingsphere.test.infra.framework.extension.mock.StaticMockS
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Answers;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
@@ -81,6 +87,7 @@ import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
 import java.nio.charset.StandardCharsets;
+import java.sql.Date;
 import java.sql.SQLException;
 import java.sql.Types;
 import java.util.ArrayList;
@@ -91,6 +98,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Stream;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.contains;
@@ -210,6 +218,37 @@ class MySQLComStmtExecuteExecutorTest {
         assertThat(actualQueryRowPacket, isA(MySQLBinaryResultSetRowPacket.class));
         executor.close();
         verify(proxyBackendHandler).close();
+    }
+    
+    @ParameterizedTest(name = "{0}: {1}")
+    @MethodSource("yearValues")
+    void assertGetQueryRowPacketWithYear(final int jdbcType, final Object year, final byte[] expected) throws SQLException {
+        MySQLComStmtExecutePacket packet = mock(MySQLComStmtExecutePacket.class);
+        when(packet.getStatementId()).thenReturn(1);
+        when(proxyBackendHandler.execute()).thenReturn(new QueryResponseHeader(Collections.emptyList()));
+        when(ProxyBackendHandlerFactory.newInstance(eq(databaseType), any(QueryContext.class), eq(connectionSession), anyBoolean())).thenReturn(proxyBackendHandler);
+        when(proxyBackendHandler.getRowData()).thenReturn(new QueryResponseRow(Arrays.asList(new QueryResponseCell(jdbcType, year, "YEAR"), new QueryResponseCell(Types.INTEGER, 42),
+                new QueryResponseCell(Types.VARCHAR, "foo"), new QueryResponseCell(Types.DATE, Date.valueOf("2023-01-02"), "DATE"), new QueryResponseCell(Types.SMALLINT, 7, "SMALLINT"))));
+        MySQLComStmtExecuteExecutor executor = new MySQLComStmtExecuteExecutor(packet, connectionSession);
+        executor.execute();
+        DatabasePacket actual = executor.getQueryRowPacket();
+        ByteBuf buffer = Unpooled.buffer();
+        try {
+            actual.write(new MySQLPacketPayload(buffer, StandardCharsets.UTF_8));
+            assertThat(ByteBufUtil.getBytes(buffer), is(expected));
+        } finally {
+            buffer.release();
+        }
+    }
+    
+    private static Stream<Arguments> yearValues() {
+        return Stream.of(
+                Arguments.of(Types.INTEGER, 0, new byte[]{0, 0, 0, 0, 42, 0, 0, 0, 3, 'f', 'o', 'o', 4, -25, 7, 1, 2, 7, 0}),
+                Arguments.of(Types.INTEGER, 2000, new byte[]{0, 0, -48, 7, 42, 0, 0, 0, 3, 'f', 'o', 'o', 4, -25, 7, 1, 2, 7, 0}),
+                Arguments.of(Types.INTEGER, 2023, new byte[]{0, 0, -25, 7, 42, 0, 0, 0, 3, 'f', 'o', 'o', 4, -25, 7, 1, 2, 7, 0}),
+                Arguments.of(Types.INTEGER, null, new byte[]{0, 4, 42, 0, 0, 0, 3, 'f', 'o', 'o', 4, -25, 7, 1, 2, 7, 0}),
+                Arguments.of(Types.SMALLINT, 2023, new byte[]{0, 0, -25, 7, 42, 0, 0, 0, 3, 'f', 'o', 'o', 4, -25, 7, 1, 2, 7, 0}),
+                Arguments.of(Types.DATE, Date.valueOf("2023-01-02"), new byte[]{0, 0, 4, -25, 7, 1, 2, 42, 0, 0, 0, 3, 'f', 'o', 'o', 4, -25, 7, 1, 2, 7, 0}));
     }
     
     @Test

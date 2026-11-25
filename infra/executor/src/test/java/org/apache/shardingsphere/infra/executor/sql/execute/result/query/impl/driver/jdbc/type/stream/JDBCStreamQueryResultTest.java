@@ -44,6 +44,7 @@ import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.Calendar;
+import java.util.Collections;
 import java.util.Optional;
 
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -218,6 +219,67 @@ class JDBCStreamQueryResultTest {
         ResultSet resultSet = mock(ResultSet.class);
         when(resultSet.getObject(1)).thenReturn("value");
         assertThat(new JDBCStreamQueryResult(resultSet).getValue(1, Object.class), is("value"));
+    }
+    
+    @Test
+    void assertGetZeroValueWithIntegerColumn() throws SQLException {
+        ResultSet resultSet = mock(ResultSet.class);
+        when(DatabaseTypedSPILoader.findService(DialectResultSetMapper.class, databaseType)).thenReturn(Optional.empty());
+        assertThat(new JDBCStreamQueryResult(resultSet, databaseType, false, Collections.singleton(1)).getValue(1, Object.class), is(0));
+        verify(resultSet, never()).getObject(1);
+    }
+    
+    @Test
+    void assertGetValueWithIntegerColumn() throws SQLException {
+        ResultSet resultSet = mock(ResultSet.class);
+        when(DatabaseTypedSPILoader.findService(DialectResultSetMapper.class, databaseType)).thenReturn(Optional.empty());
+        when(resultSet.getInt(1)).thenReturn(2000);
+        assertThat(new JDBCStreamQueryResult(resultSet, databaseType, false, Collections.singleton(1)).getValue(1, Object.class), is(2000));
+        verify(resultSet, never()).getObject(1);
+    }
+    
+    @Test
+    void assertGetNullValueWithIntegerColumn() throws SQLException {
+        ResultSet resultSet = mock(ResultSet.class);
+        when(DatabaseTypedSPILoader.findService(DialectResultSetMapper.class, databaseType)).thenReturn(Optional.empty());
+        when(resultSet.wasNull()).thenReturn(true);
+        assertNull(new JDBCStreamQueryResult(resultSet, databaseType, false, Collections.singleton(1)).getValue(1, Object.class));
+    }
+    
+    @Test
+    void assertGetValueWithUnselectedDateColumn() throws SQLException {
+        ResultSet resultSet = mock(ResultSet.class);
+        when(DatabaseTypedSPILoader.findService(DialectResultSetMapper.class, databaseType)).thenReturn(Optional.empty());
+        Date expected = Date.valueOf("2000-01-01");
+        when(resultSet.getObject(1)).thenReturn(expected);
+        assertThat(new JDBCStreamQueryResult(resultSet, databaseType, false, Collections.singleton(2)).getValue(1, Object.class), sameInstance(expected));
+    }
+    
+    @Test
+    void assertGetDateWithIntegerColumn() throws SQLException {
+        ResultSet resultSet = mock(ResultSet.class);
+        when(DatabaseTypedSPILoader.findService(DialectResultSetMapper.class, databaseType)).thenReturn(Optional.empty());
+        Date expected = Date.valueOf("2000-01-01");
+        when(resultSet.getDate(1)).thenReturn(expected);
+        assertThat(new JDBCStreamQueryResult(resultSet, databaseType, false, Collections.singleton(1)).getValue(1, Date.class), sameInstance(expected));
+    }
+    
+    @Test
+    void assertGetAssignableValueWithIntegerColumn() throws SQLException {
+        ResultSet resultSet = mock(ResultSet.class);
+        when(DatabaseTypedSPILoader.findService(DialectResultSetMapper.class, databaseType)).thenReturn(Optional.empty());
+        Date expected = Date.valueOf("2000-01-01");
+        when(resultSet.getObject(1)).thenReturn(expected);
+        assertThat(new JDBCStreamQueryResult(resultSet, databaseType, false, Collections.singleton(1)).getValue(1, Comparable.class), sameInstance(expected));
+    }
+    
+    @Test
+    void assertGetNativeObjectWithoutIntegerColumns() throws SQLException {
+        ResultSet resultSet = mock(ResultSet.class);
+        when(DatabaseTypedSPILoader.findService(DialectResultSetMapper.class, databaseType)).thenReturn(Optional.empty());
+        Date expected = Date.valueOf("2000-01-01");
+        when(resultSet.getObject(1)).thenReturn(expected);
+        assertThat(new JDBCStreamQueryResult(resultSet, databaseType, true).getValue(1, Object.class), sameInstance(expected));
     }
     
     @Test

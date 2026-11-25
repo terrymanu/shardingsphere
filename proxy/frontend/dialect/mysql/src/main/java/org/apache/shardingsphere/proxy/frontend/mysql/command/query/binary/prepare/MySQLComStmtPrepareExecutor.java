@@ -31,6 +31,7 @@ import org.apache.shardingsphere.database.protocol.mysql.packet.command.query.bi
 import org.apache.shardingsphere.database.protocol.mysql.packet.command.query.binary.prepare.MySQLComStmtPreparePacket;
 import org.apache.shardingsphere.database.protocol.mysql.packet.generic.MySQLEofPacket;
 import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
+import org.apache.shardingsphere.infra.annotation.HighFrequencyInvocation;
 import org.apache.shardingsphere.infra.binder.context.segment.select.projection.Projection;
 import org.apache.shardingsphere.infra.binder.context.segment.select.projection.impl.ColumnProjection;
 import org.apache.shardingsphere.infra.binder.context.statement.SQLStatementContext;
@@ -51,6 +52,7 @@ import org.apache.shardingsphere.proxy.frontend.mysql.command.query.binary.MySQL
 import org.apache.shardingsphere.proxy.frontend.mysql.command.query.binary.MySQLStatementIdGenerator;
 import org.apache.shardingsphere.sql.parser.statement.core.segment.generic.ParameterMarkerSegment;
 import org.apache.shardingsphere.sql.parser.statement.core.statement.SQLStatement;
+import org.apache.shardingsphere.sqlfederation.rule.SQLFederationRule;
 
 import java.sql.SQLException;
 import java.sql.Types;
@@ -121,12 +123,19 @@ public final class MySQLComStmtPrepareExecutor implements CommandExecutor {
         return result;
     }
     
+    @HighFrequencyInvocation
     private Collection<MySQLPacket> createProjectionColumnDefinition41Packets(final SelectStatementContext selectStatementContext, final int characterSet,
                                                                               final MySQLServerPreparedStatement serverPreparedStatement) {
-        if (isProjectionMetadataDerivableLocally(selectStatementContext)) {
-            return createProjectionColumnDefinition41PacketsByLocalMetadata(selectStatementContext, characterSet);
+        Collection<MySQLPacket> localPackets = isProjectionMetadataDerivableLocally(selectStatementContext)
+                ? createProjectionColumnDefinition41PacketsByLocalMetadata(selectStatementContext, characterSet)
+                : Collections.emptyList();
+        if (!localPackets.isEmpty() && !containsDateProjection(selectStatementContext)) {
+            return localPackets;
         }
-        return loadProjectionColumnDefinition41Packets(selectStatementContext, characterSet, serverPreparedStatement);
+        boolean useNativeYearType = !ProxyContext.getInstance().getContextManager().getMetaDataContexts().getMetaData()
+                .getGlobalRuleMetaData().getSingleRule(SQLFederationRule.class).isSqlFederationEnabled();
+        return !localPackets.isEmpty() && !useNativeYearType ? localPackets
+                : loadProjectionColumnDefinition41Packets(selectStatementContext, characterSet, serverPreparedStatement, useNativeYearType, localPackets);
     }
     
     private boolean isProjectionMetadataDerivableLocally(final SelectStatementContext selectStatementContext) {
@@ -140,7 +149,7 @@ public final class MySQLComStmtPrepareExecutor implements CommandExecutor {
             }
             ColumnProjection columnProjection = (ColumnProjection) each;
             if (null == Optional.ofNullable(schema.getTable(columnProjection.getOriginalTable().getValue()))
-                    .map(table -> table.getColumn(columnProjection.getOriginalColumn().getValue())).orElse(null)) {
+                    .map(optional -> optional.getColumn(columnProjection.getOriginalColumn().getValue())).orElse(null)) {
                 return false;
             }
         }
@@ -162,12 +171,24 @@ public final class MySQLComStmtPrepareExecutor implements CommandExecutor {
         return result;
     }
     
+    private boolean containsDateProjection(final SelectStatementContext selectStatementContext) {
+        ShardingSphereSchema schema = getSchema(selectStatementContext);
+        for (Projection each : selectStatementContext.getProjectionsContext().getExpandProjections()) {
+            ColumnProjection columnProjection = (ColumnProjection) each;
+            if (Types.DATE == schema.getTable(columnProjection.getOriginalTable().getValue()).getColumn(columnProjection.getOriginalColumn().getValue()).getDataType()) {
+                return true;
+            }
+        }
+        return false;
+    }
+    
     private Collection<MySQLPacket> loadProjectionColumnDefinition41Packets(final SelectStatementContext selectStatementContext, final int characterSet,
-                                                                            final MySQLServerPreparedStatement serverPreparedStatement) {
+                                                                            final MySQLServerPreparedStatement serverPreparedStatement, final boolean useNativeYearType,
+                                                                            final Collection<MySQLPacket> localPackets) {
         try {
-            return MySQLProjectionMetadataResolver.resolveProjectionPackets(connectionSession, serverPreparedStatement, selectStatementContext, characterSet);
+            return MySQLProjectionMetadataResolver.resolveProjectionPackets(connectionSession, serverPreparedStatement, selectStatementContext, characterSet, useNativeYearType, localPackets);
         } catch (final SQLException ignored) {
-            return createDefaultProjectionColumnDefinition41Packets(selectStatementContext, characterSet);
+            return localPackets.isEmpty() ? createDefaultProjectionColumnDefinition41Packets(selectStatementContext, characterSet) : localPackets;
         }
     }
     

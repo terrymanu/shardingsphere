@@ -40,6 +40,9 @@ import org.apache.shardingsphere.sql.parser.statement.core.statement.SQLStatemen
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
 import org.mockito.internal.configuration.plugins.Plugins;
@@ -58,11 +61,14 @@ import java.util.Collections;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.Queue;
+import java.util.stream.Stream;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.isA;
+import static org.hamcrest.Matchers.sameInstance;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
@@ -116,7 +122,7 @@ class ProxyJDBCExecutorCallbackTest {
         when(memoryStatement.getResultSet()).thenReturn(memoryResultSet);
         when(memoryResultSet.getMetaData()).thenReturn(memoryMetaData);
         when(memoryMetaData.getColumnCount()).thenReturn(0);
-        ProxyJDBCExecutorCallback callback = mockCallback(true, true, true, true);
+        ProxyJDBCExecutorCallback callback = mockCallback(databaseType, false, true, true, true, true);
         ExecuteResult streamResult = callback.executeSQL("foo_sql", streamStatement, ConnectionMode.MEMORY_STRICTLY, databaseType);
         ExecuteResult memoryResult = callback.executeSQL("bar_sql", memoryStatement, ConnectionMode.CONNECTION_STRICTLY, databaseType);
         assertThat(streamResult, isA(JDBCStreamQueryResult.class));
@@ -125,6 +131,96 @@ class ProxyJDBCExecutorCallbackTest {
         verify(databaseProxyConnector).add(streamResultSet);
         verify(databaseProxyConnector).add(memoryStatement);
         verify(databaseProxyConnector).add(memoryResultSet);
+    }
+    
+    @Test
+    void assertExecuteSQLWithMySQLYearStream() throws ReflectiveOperationException, SQLException {
+        setContextManager(mock(ContextManager.class));
+        DatabaseType protocolType = mock(DatabaseType.class);
+        when(protocolType.getType()).thenReturn("MySQL");
+        Statement statement = mock(Statement.class);
+        ResultSet resultSet = mock(ResultSet.class);
+        ResultSetMetaData metaData = mock(ResultSetMetaData.class);
+        when(statement.getResultSet()).thenReturn(resultSet);
+        when(resultSet.getMetaData()).thenReturn(metaData);
+        when(metaData.getColumnCount()).thenReturn(3);
+        when(metaData.getColumnTypeName(1)).thenReturn("YEAR");
+        when(metaData.getColumnTypeName(2)).thenReturn("DATE");
+        when(metaData.getColumnTypeName(3)).thenReturn("SMALLINT");
+        Object expected = new Object();
+        when(resultSet.getObject(2)).thenReturn(expected);
+        when(resultSet.getObject(3)).thenReturn((short) 2000);
+        ProxyJDBCExecutorCallback callback = mockCallback(protocolType, true, false, false, true);
+        JDBCStreamQueryResult actual = (JDBCStreamQueryResult) callback.executeSQL("foo_sql", statement, ConnectionMode.MEMORY_STRICTLY, databaseType);
+        assertThat(actual.getValue(1, Object.class), is(0));
+        assertThat(actual.getValue(2, Object.class), sameInstance(expected));
+        assertThat(actual.getValue(3, Object.class), is((short) 2000));
+        assertFalse(actual.getJDBCResultSet().isPresent());
+    }
+    
+    @Test
+    void assertExecuteSQLWithMySQLYearMemory() throws ReflectiveOperationException, SQLException {
+        setContextManager(mock(ContextManager.class));
+        DatabaseType protocolType = mock(DatabaseType.class);
+        when(protocolType.getType()).thenReturn("MySQL");
+        Statement statement = mock(Statement.class);
+        ResultSet resultSet = mock(ResultSet.class);
+        ResultSetMetaData metaData = mock(ResultSetMetaData.class);
+        when(statement.getResultSet()).thenReturn(resultSet);
+        when(resultSet.getMetaData()).thenReturn(metaData);
+        when(metaData.getColumnCount()).thenReturn(2);
+        when(metaData.getColumnTypeName(1)).thenReturn("YEAR");
+        when(metaData.getColumnTypeName(2)).thenReturn("YEAR");
+        when(resultSet.next()).thenReturn(true, false);
+        when(resultSet.wasNull()).thenReturn(false, true);
+        ProxyJDBCExecutorCallback callback = mockCallback(protocolType, true, false, false, true);
+        JDBCMemoryQueryResult actual = (JDBCMemoryQueryResult) callback.executeSQL("foo_sql", statement, ConnectionMode.CONNECTION_STRICTLY, databaseType);
+        assertTrue(actual.next());
+        assertThat(actual.getValue(1, Object.class), is(0));
+        assertNull(actual.getValue(2, Object.class));
+        assertFalse(actual.getJDBCResultSet().isPresent());
+    }
+    
+    @Test
+    void assertExecuteSQLWithMySQLDerivedProtocolYear() throws ReflectiveOperationException, SQLException {
+        setContextManager(mock(ContextManager.class));
+        DatabaseType protocolType = mock(DatabaseType.class);
+        DatabaseType trunkType = mock(DatabaseType.class);
+        when(protocolType.getTrunkDatabaseType()).thenReturn(Optional.of(trunkType));
+        when(trunkType.getType()).thenReturn("MySQL");
+        Statement statement = mock(Statement.class);
+        ResultSet resultSet = mock(ResultSet.class);
+        ResultSetMetaData metaData = mock(ResultSetMetaData.class);
+        when(statement.getResultSet()).thenReturn(resultSet);
+        when(resultSet.getMetaData()).thenReturn(metaData);
+        when(metaData.getColumnCount()).thenReturn(1);
+        when(metaData.getColumnTypeName(1)).thenReturn("YEAR");
+        when(resultSet.getInt(1)).thenReturn(2000);
+        ProxyJDBCExecutorCallback callback = mockCallback(protocolType, true, false, false, true);
+        JDBCStreamQueryResult actual = (JDBCStreamQueryResult) callback.executeSQL("foo_sql", statement, ConnectionMode.MEMORY_STRICTLY, databaseType);
+        assertThat(actual.getValue(1, Object.class), is(2000));
+    }
+    
+    @ParameterizedTest(name = "{0}, integer YEAR: {1}")
+    @MethodSource("getLegacyYearSelections")
+    void assertExecuteSQLWithNativeYearObject(final String protocolTypeName, final boolean readYearAsInteger) throws ReflectiveOperationException, SQLException {
+        setContextManager(mock(ContextManager.class));
+        Statement statement = mock(Statement.class);
+        ResultSet resultSet = mock(ResultSet.class);
+        ResultSetMetaData metaData = mock(ResultSetMetaData.class);
+        when(statement.getResultSet()).thenReturn(resultSet);
+        when(resultSet.getMetaData()).thenReturn(metaData);
+        lenient().when(metaData.getColumnCount()).thenReturn(1);
+        lenient().when(metaData.getColumnTypeName(1)).thenReturn("YEAR");
+        Object expected = new Object();
+        when(resultSet.getObject(1)).thenReturn(expected);
+        ProxyJDBCExecutorCallback callback = mockCallback(TypedSPILoader.getService(DatabaseType.class, protocolTypeName), readYearAsInteger, false, false, true);
+        JDBCStreamQueryResult actual = (JDBCStreamQueryResult) callback.executeSQL("foo_sql", statement, ConnectionMode.MEMORY_STRICTLY, databaseType);
+        assertThat(actual.getValue(1, Object.class), sameInstance(expected));
+    }
+    
+    private static Stream<Arguments> getLegacyYearSelections() {
+        return Stream.of(Arguments.of("MySQL", false), Arguments.of("FIXTURE", false), Arguments.of("FIXTURE", true));
     }
     
     @Test
@@ -154,7 +250,7 @@ class ProxyJDBCExecutorCallbackTest {
         Statement unsupportedStatement = mock(Statement.class);
         when(unsupportedStatement.getUpdateCount()).thenReturn(6);
         when(unsupportedStatement.getGeneratedKeys()).thenThrow(new SQLFeatureNotSupportedException());
-        ProxyJDBCExecutorCallback callback = mockCallback(true, false, false, false, false, false);
+        ProxyJDBCExecutorCallback callback = mockCallback(databaseType, false, true, false, false, false, false, false);
         UpdateResult integerUpdate = (UpdateResult) callback.executeSQL("int_sql", integerStatement, ConnectionMode.MEMORY_STRICTLY, databaseType);
         assertThat(integerUpdate.getUpdateCount(), is(3));
         assertThat(integerUpdate.getLastInsertId(), is(99L));
@@ -175,7 +271,7 @@ class ProxyJDBCExecutorCallbackTest {
         setContextManager(mock(ContextManager.class));
         Statement statement = mock(Statement.class);
         when(statement.getUpdateCount()).thenReturn(7);
-        ProxyJDBCExecutorCallback callback = mockCallback(false, false, false);
+        ProxyJDBCExecutorCallback callback = mockCallback(databaseType, false, false, false, false);
         UpdateResult updateResult = (UpdateResult) callback.executeSQL("no_key_sql", statement, ConnectionMode.CONNECTION_STRICTLY, databaseType);
         assertThat(updateResult.getUpdateCount(), is(7));
         assertThat(updateResult.getLastInsertId(), is(0L));
@@ -190,7 +286,7 @@ class ProxyJDBCExecutorCallbackTest {
         ContextManager contextManager = mock(ContextManager.class, RETURNS_DEEP_STUBS);
         when(contextManager.getMetaDataContexts().getMetaData()).thenReturn(metaData);
         setContextManager(contextManager);
-        ProxyJDBCExecutorCallback callback = mockCallback(false, false);
+        ProxyJDBCExecutorCallback callback = mockCallback(databaseType, false, false, false);
         try (MockedStatic<DatabaseTypedSPILoader> spiLoader = mockStatic(DatabaseTypedSPILoader.class)) {
             DialectSaneQueryResultEngine saneQueryResultEngine = mock(DialectSaneQueryResultEngine.class);
             ExecuteResult executeResult = mock(ExecuteResult.class);
@@ -209,7 +305,7 @@ class ProxyJDBCExecutorCallbackTest {
         ContextManager contextManager = mock(ContextManager.class, RETURNS_DEEP_STUBS);
         when(contextManager.getMetaDataContexts().getMetaData()).thenReturn(metaData);
         setContextManager(contextManager);
-        ProxyJDBCExecutorCallback callback = mockCallback(false, false);
+        ProxyJDBCExecutorCallback callback = mockCallback(databaseType, false, false, false);
         try (MockedStatic<DatabaseTypedSPILoader> databaseTypedSPILoader = mockStatic(DatabaseTypedSPILoader.class)) {
             databaseTypedSPILoader.when(() -> DatabaseTypedSPILoader.findService(DialectSaneQueryResultEngine.class, databaseType)).thenReturn(Optional.empty());
             assertFalse(callback.getSaneResult(sqlStatement, sqlException).isPresent());
@@ -225,7 +321,7 @@ class ProxyJDBCExecutorCallbackTest {
         ContextManager contextManager = mock(ContextManager.class, RETURNS_DEEP_STUBS);
         when(contextManager.getMetaDataContexts().getMetaData()).thenReturn(metaData);
         setContextManager(contextManager);
-        ProxyJDBCExecutorCallback callback = mockCallback(false, false);
+        ProxyJDBCExecutorCallback callback = mockCallback(databaseType, false, false, false);
         try (MockedStatic<DatabaseTypedSPILoader> spiLoader = mockStatic(DatabaseTypedSPILoader.class)) {
             spiLoader.when(() -> DatabaseTypedSPILoader.findService(DialectSaneQueryResultEngine.class, databaseType)).thenReturn(Optional.empty());
             Optional<ExecuteResult> actual = callback.getSaneResult(sqlStatement, sqlException);
@@ -238,7 +334,7 @@ class ProxyJDBCExecutorCallbackTest {
         setContextManager(mock(ContextManager.class));
         Statement statement = mock(Statement.class);
         when(statement.getUpdateCount()).thenReturn(1);
-        ProxyJDBCExecutorCallback callback = mockCallback(false, false, false);
+        ProxyJDBCExecutorCallback callback = mockCallback(databaseType, false, false, false, false);
         callback.executeSQL("insert_sql", statement, ConnectionMode.MEMORY_STRICTLY, databaseType);
         verify(statement, never()).getGeneratedKeys();
     }
@@ -257,7 +353,7 @@ class ProxyJDBCExecutorCallbackTest {
         when(metaData.getColumnType(1)).thenReturn(Types.INTEGER);
         when(resultSet.getLong(1)).thenReturn(99L);
         
-        ProxyJDBCExecutorCallback callback = mockCallback(true, false, false);
+        ProxyJDBCExecutorCallback callback = mockCallback(databaseType, false, true, false, false);
         callback.executeSQL("insert_sql", statement, ConnectionMode.MEMORY_STRICTLY, databaseType);
         verify(statement).getGeneratedKeys();
     }
@@ -270,9 +366,10 @@ class ProxyJDBCExecutorCallbackTest {
         Plugins.getMemberAccessor().set(contextManagerField, ProxyContext.getInstance(), contextManager);
     }
     
-    private ProxyJDBCExecutorCallback mockCallback(final boolean isReturnGeneratedKeys, final boolean fetchMetaData, final Boolean... executeResults) throws SQLException {
-        ProxyJDBCExecutorCallback result = mock(ProxyJDBCExecutorCallback.class, withSettings().useConstructor(
-                databaseType, resourceMetaData, sqlStatement, databaseProxyConnector, isReturnGeneratedKeys, false, fetchMetaData).defaultAnswer(CALLS_REAL_METHODS));
+    private ProxyJDBCExecutorCallback mockCallback(final DatabaseType protocolType, final boolean readYearAsInteger, final boolean isReturnGeneratedKeys, final boolean fetchMetaData,
+                                                   final Boolean... executeResults) throws SQLException {
+        ProxyJDBCExecutorCallback result = mock(ProxyJDBCExecutorCallback.class, withSettings().useConstructor(protocolType, resourceMetaData, sqlStatement, databaseProxyConnector,
+                isReturnGeneratedKeys, false, fetchMetaData, readYearAsInteger).defaultAnswer(CALLS_REAL_METHODS));
         Queue<Boolean> executeResultQueue = new ArrayDeque<>(Arrays.asList(executeResults));
         lenient().when(result.execute(anyString(), any(Statement.class), anyBoolean())).thenAnswer(invocation -> !executeResultQueue.isEmpty() && executeResultQueue.remove());
         return result;

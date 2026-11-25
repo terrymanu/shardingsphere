@@ -19,6 +19,7 @@ package org.apache.shardingsphere.proxy.backend.connector.jdbc.executor.callback
 
 import org.apache.shardingsphere.database.connector.core.spi.DatabaseTypedSPILoader;
 import org.apache.shardingsphere.database.connector.core.type.DatabaseType;
+import org.apache.shardingsphere.infra.annotation.HighFrequencyInvocation;
 import org.apache.shardingsphere.infra.config.props.ConfigurationPropertyKey;
 import org.apache.shardingsphere.infra.executor.sql.execute.engine.ConnectionMode;
 import org.apache.shardingsphere.infra.executor.sql.execute.engine.driver.jdbc.JDBCExecutorCallback;
@@ -35,10 +36,14 @@ import org.apache.shardingsphere.proxy.backend.context.ProxyContext;
 import org.apache.shardingsphere.sql.parser.statement.core.statement.SQLStatement;
 
 import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.SQLFeatureNotSupportedException;
 import java.sql.Statement;
 import java.sql.Types;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.Optional;
 
 /**
@@ -52,15 +57,24 @@ public abstract class ProxyJDBCExecutorCallback extends JDBCExecutorCallback<Exe
     
     private final boolean fetchMetaData;
     
+    private final boolean readYearAsInteger;
+    
     private boolean hasMetaData;
     
     protected ProxyJDBCExecutorCallback(final DatabaseType protocolType, final ResourceMetaData resourceMetaData, final SQLStatement sqlStatement,
                                         final DatabaseProxyConnector databaseProxyConnector,
                                         final boolean isReturnGeneratedKeys, final boolean isExceptionThrown, final boolean fetchMetaData) {
+        this(protocolType, resourceMetaData, sqlStatement, databaseProxyConnector, isReturnGeneratedKeys, isExceptionThrown, fetchMetaData, false);
+    }
+    
+    protected ProxyJDBCExecutorCallback(final DatabaseType protocolType, final ResourceMetaData resourceMetaData, final SQLStatement sqlStatement,
+                                        final DatabaseProxyConnector databaseProxyConnector, final boolean isReturnGeneratedKeys, final boolean isExceptionThrown,
+                                        final boolean fetchMetaData, final boolean readYearAsInteger) {
         super(protocolType, resourceMetaData, sqlStatement, isExceptionThrown);
         this.databaseProxyConnector = databaseProxyConnector;
         this.isReturnGeneratedKeys = isReturnGeneratedKeys;
         this.fetchMetaData = fetchMetaData;
+        this.readYearAsInteger = readYearAsInteger && "MySQL".equals(protocolType.getTrunkDatabaseType().orElse(protocolType).getType());
     }
     
     @Override
@@ -77,8 +91,27 @@ public abstract class ProxyJDBCExecutorCallback extends JDBCExecutorCallback<Exe
     
     protected abstract boolean execute(String sql, Statement statement, boolean isReturnGeneratedKeys) throws SQLException;
     
+    @HighFrequencyInvocation
     private QueryResult createQueryResult(final ResultSet resultSet, final ConnectionMode connectionMode, final DatabaseType storageType) throws SQLException {
-        return ConnectionMode.MEMORY_STRICTLY == connectionMode ? new JDBCStreamQueryResult(resultSet, storageType) : new JDBCMemoryQueryResult(resultSet, storageType);
+        Collection<Integer> integerColumnIndexes = getIntegerColumnIndexes(resultSet);
+        return ConnectionMode.MEMORY_STRICTLY == connectionMode
+                ? new JDBCStreamQueryResult(resultSet, storageType, false, integerColumnIndexes)
+                : new JDBCMemoryQueryResult(resultSet, storageType, false, integerColumnIndexes);
+    }
+    
+    private Collection<Integer> getIntegerColumnIndexes(final ResultSet resultSet) throws SQLException {
+        if (!readYearAsInteger) {
+            return Collections.emptySet();
+        }
+        ResultSetMetaData metaData = resultSet.getMetaData();
+        int columnCount = metaData.getColumnCount();
+        Collection<Integer> result = new HashSet<>();
+        for (int columnIndex = 1; columnIndex <= columnCount; columnIndex++) {
+            if ("YEAR".equalsIgnoreCase(metaData.getColumnTypeName(columnIndex))) {
+                result.add(columnIndex);
+            }
+        }
+        return result;
     }
     
     private long getGeneratedKey(final Statement statement) throws SQLException {

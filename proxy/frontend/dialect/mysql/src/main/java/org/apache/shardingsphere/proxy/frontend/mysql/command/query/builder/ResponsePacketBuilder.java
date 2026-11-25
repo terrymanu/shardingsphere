@@ -67,8 +67,9 @@ public final class ResponsePacketBuilder {
         result.add(new MySQLFieldCountPacket(queryHeaders.size()));
         for (QueryHeader each : queryHeaders) {
             int characterSet = BINARY_TYPES.contains(each.getColumnType()) || Types.TIME == each.getColumnType() ? MySQLCharacterSets.BINARY.getId() : sessionCharacterSet;
+            MySQLBinaryColumnType columnType = getColumnType(each.getColumnType(), each.getColumnTypeName());
             result.add(new MySQLColumnDefinition41Packet(characterSet, getColumnDefinitionFlag(each), each.getSchema(), each.getTable(), each.getTable(),
-                    each.getColumnLabel(), each.getColumnName(), each.getColumnLength(), MySQLBinaryColumnType.valueOfJDBCType(each.getColumnType()), each.getDecimals(), false));
+                    each.getColumnLabel(), each.getColumnName(), each.getColumnLength(), columnType, each.getDecimals(), false));
         }
         result.add(new MySQLEofPacket(statusFlags));
         return result;
@@ -100,6 +101,18 @@ public final class ResponsePacketBuilder {
     
     private static boolean isCharacterLargeObject(final int jdbcType) {
         return Types.CLOB == jdbcType || Types.NCLOB == jdbcType;
+    }
+    
+    /**
+     * Get MySQL column type.
+     *
+     * @param jdbcType JDBC type
+     * @param columnTypeName column type name, or null if unavailable
+     * @return MySQL column type
+     */
+    @HighFrequencyInvocation
+    public static MySQLBinaryColumnType getColumnType(final int jdbcType, final String columnTypeName) {
+        return Types.INTEGER == jdbcType && "YEAR".equalsIgnoreCase(columnTypeName) ? MySQLBinaryColumnType.YEAR : MySQLBinaryColumnType.valueOfJDBCType(jdbcType);
     }
     
     /**

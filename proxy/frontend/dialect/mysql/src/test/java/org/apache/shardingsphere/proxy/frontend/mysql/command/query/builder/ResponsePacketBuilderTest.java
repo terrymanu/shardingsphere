@@ -89,6 +89,22 @@ class ResponsePacketBuilderTest {
         assertThat(eofPacket.getStatusFlags(), is(statusFlags));
     }
     
+    @ParameterizedTest(name = "{0}: {1}")
+    @MethodSource("columnTypes")
+    void assertGetColumnType(final int jdbcType, final String columnTypeName, final MySQLBinaryColumnType expected) {
+        assertThat(ResponsePacketBuilder.getColumnType(jdbcType, columnTypeName), is(expected));
+    }
+    
+    private static Stream<Arguments> columnTypes() {
+        return Stream.of(
+                Arguments.of(Types.INTEGER, "YEAR", MySQLBinaryColumnType.YEAR),
+                Arguments.of(Types.INTEGER, "year", MySQLBinaryColumnType.YEAR),
+                Arguments.of(Types.DATE, "YEAR", MySQLBinaryColumnType.DATE),
+                Arguments.of(Types.SMALLINT, "YEAR", MySQLBinaryColumnType.SHORT),
+                Arguments.of(Types.INTEGER, "INTEGER", MySQLBinaryColumnType.LONG),
+                Arguments.of(Types.INTEGER, null, MySQLBinaryColumnType.LONG));
+    }
+    
     @Test
     void assertBuildUpdateResponsePackets() {
         UpdateResponseHeader updateResponseHeader = mock(UpdateResponseHeader.class);
@@ -156,6 +172,16 @@ class ResponsePacketBuilderTest {
                 Arguments.of("time-milliseconds", new QueryHeader("foo_db", "foo_table", "foo_time", "foo_time", Types.TIME, "TIME", 14, 3, true, false, false, false),
                         SESSION_CHARACTER_SET, 0, MySQLCharacterSets.BINARY.getId(), MySQLBinaryColumnType.TIME, 0, 3),
                 Arguments.of("time-microseconds", new QueryHeader("foo_db", "foo_table", "foo_time", "foo_time", Types.TIME, "TIME", 17, 6, true, false, false, false),
-                        SESSION_CHARACTER_SET, 0, MySQLCharacterSets.BINARY.getId(), MySQLBinaryColumnType.TIME, 0, 6));
+                        SESSION_CHARACTER_SET, 0, MySQLCharacterSets.BINARY.getId(), MySQLBinaryColumnType.TIME, 0, 6),
+                Arguments.of("native-year", new QueryHeader("foo_db", "foo_table", "foo_year", "foo_year", Types.INTEGER, "YEAR", 4, 0, false, false, false, false),
+                        SESSION_CHARACTER_SET, 0, SESSION_CHARACTER_SET, MySQLBinaryColumnType.YEAR, MySQLColumnDefinitionFlag.UNSIGNED.getValue(), 0),
+                Arguments.of("legacy-year-as-date", new QueryHeader("foo_db", "foo_table", "foo_year", "foo_year", Types.DATE, "YEAR", 4, 0, false, false, false, false),
+                        SESSION_CHARACTER_SET, 0, SESSION_CHARACTER_SET, MySQLBinaryColumnType.DATE, MySQLColumnDefinitionFlag.UNSIGNED.getValue(), 0),
+                Arguments.of("legacy-year-as-smallint", new QueryHeader("foo_db", "foo_table", "foo_year", "foo_year", Types.SMALLINT, "year", 4, 0, false, false, false, false),
+                        SESSION_CHARACTER_SET, 0, SESSION_CHARACTER_SET, MySQLBinaryColumnType.SHORT, MySQLColumnDefinitionFlag.UNSIGNED.getValue(), 0),
+                Arguments.of("ordinary-date", new QueryHeader("foo_db", "foo_table", "foo_date", "foo_date", Types.DATE, "DATE", 10, 0, false, false, false, false),
+                        SESSION_CHARACTER_SET, 0, SESSION_CHARACTER_SET, MySQLBinaryColumnType.DATE, MySQLColumnDefinitionFlag.UNSIGNED.getValue(), 0),
+                Arguments.of("ordinary-smallint", new QueryHeader("foo_db", "foo_table", "foo_short", "foo_short", Types.SMALLINT, "SMALLINT", 6, 0, true, false, false, false),
+                        SESSION_CHARACTER_SET, 0, SESSION_CHARACTER_SET, MySQLBinaryColumnType.SHORT, 0, 0));
     }
 }

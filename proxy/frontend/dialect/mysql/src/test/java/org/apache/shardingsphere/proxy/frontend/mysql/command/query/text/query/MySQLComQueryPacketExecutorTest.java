@@ -17,13 +17,18 @@
 
 package org.apache.shardingsphere.proxy.frontend.mysql.command.query.text.query;
 
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufUtil;
+import io.netty.buffer.Unpooled;
 import org.apache.shardingsphere.database.protocol.mysql.constant.MySQLCharacterSets;
 import org.apache.shardingsphere.database.protocol.mysql.constant.MySQLConstants;
 import org.apache.shardingsphere.database.protocol.mysql.packet.command.query.text.MySQLTextResultSetRowPacket;
 import org.apache.shardingsphere.database.protocol.mysql.packet.command.query.text.query.MySQLComQueryPacket;
 import org.apache.shardingsphere.database.protocol.mysql.packet.generic.MySQLOKPacket;
+import org.apache.shardingsphere.database.protocol.mysql.payload.MySQLPacketPayload;
 import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
 import org.apache.shardingsphere.proxy.backend.handler.ProxyBackendHandler;
+import org.apache.shardingsphere.proxy.backend.response.data.QueryResponseCell;
 import org.apache.shardingsphere.proxy.backend.response.data.QueryResponseRow;
 import org.apache.shardingsphere.proxy.backend.response.header.query.QueryHeader;
 import org.apache.shardingsphere.proxy.backend.response.header.query.QueryResponseHeader;
@@ -37,16 +42,23 @@ import org.apache.shardingsphere.test.infra.framework.extension.mock.StaticMockS
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Answers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
+import java.nio.charset.StandardCharsets;
+import java.sql.Date;
 import java.sql.SQLException;
+import java.sql.Types;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
+import java.util.stream.Stream;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
@@ -121,6 +133,32 @@ class MySQLComQueryPacketExecutorTest {
     @Test
     void assertGetQueryRowPacket() throws SQLException {
         assertThat(new MySQLComQueryPacketExecutor(packet, connectionSession).getQueryRowPacket(), isA(MySQLTextResultSetRowPacket.class));
+    }
+    
+    @ParameterizedTest(name = "{0}: {1}: {2}")
+    @MethodSource("textColumnValues")
+    void assertGetQueryRowPacketWithYear(final int jdbcType, final String columnTypeName, final Object value, final byte[] expected) throws SQLException {
+        when(proxyBackendHandler.getRowData()).thenReturn(new QueryResponseRow(Arrays.asList(new QueryResponseCell(jdbcType, value, columnTypeName), new QueryResponseCell(Types.INTEGER, 0))));
+        DatabasePacket actual = new MySQLComQueryPacketExecutor(packet, connectionSession).getQueryRowPacket();
+        ByteBuf buffer = Unpooled.buffer();
+        try {
+            actual.write(new MySQLPacketPayload(buffer, StandardCharsets.UTF_8));
+            assertThat(ByteBufUtil.getBytes(buffer), is(expected));
+        } finally {
+            buffer.release();
+        }
+    }
+    
+    private static Stream<Arguments> textColumnValues() {
+        return Stream.of(
+                Arguments.of(Types.INTEGER, "YEAR", 0, new byte[]{4, '0', '0', '0', '0', 1, '0'}),
+                Arguments.of(Types.INTEGER, "YEAR", 2000, new byte[]{4, '2', '0', '0', '0', 1, '0'}),
+                Arguments.of(Types.INTEGER, "year", 2023, new byte[]{4, '2', '0', '2', '3', 1, '0'}),
+                Arguments.of(Types.INTEGER, "YEAR", null, new byte[]{(byte) 0xfb, 1, '0'}),
+                Arguments.of(Types.INTEGER, "INTEGER", 0, new byte[]{1, '0', 1, '0'}),
+                Arguments.of(Types.OTHER, "foo_type", 0, new byte[]{1, '0', 1, '0'}),
+                Arguments.of(Types.SMALLINT, "YEAR", (short) 0, new byte[]{1, '0', 1, '0'}),
+                Arguments.of(Types.DATE, "YEAR", Date.valueOf("2000-01-01"), new byte[]{10, '2', '0', '0', '0', '-', '0', '1', '-', '0', '1', 1, '0'}));
     }
     
     @Test

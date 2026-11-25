@@ -247,7 +247,7 @@ public final class ProxySQLExecutor {
             }
         }
         executeTransactionHooksBeforeExecuteSQL(databaseConnectionManager.getConnectionSession());
-        return regularExecutor.execute(executionContext.getQueryContext(), executionGroupContext, isReturnGeneratedKeys, isExceptionThrown);
+        return regularExecutor.execute(executionContext.getQueryContext(), executionGroupContext, isReturnGeneratedKeys, isExceptionThrown, !sqlFederationEngine.isSQLFederationEnabled());
     }
     
     @SuppressWarnings({"unchecked", "rawtypes"})

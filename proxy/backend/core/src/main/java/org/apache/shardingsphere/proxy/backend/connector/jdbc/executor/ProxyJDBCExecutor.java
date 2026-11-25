@@ -59,11 +59,12 @@ public final class ProxyJDBCExecutor {
      * @param executionGroupContext execution group context
      * @param isReturnGeneratedKeys is return generated keys
      * @param isExceptionThrown is exception thrown
+     * @param readYearAsInteger whether to read native YEAR columns as integers
      * @return execute results
      * @throws SQLException SQL exception
      */
     public List<ExecuteResult> execute(final QueryContext queryContext, final ExecutionGroupContext<JDBCExecutionUnit> executionGroupContext,
-                                       final boolean isReturnGeneratedKeys, final boolean isExceptionThrown) throws SQLException {
+                                       final boolean isReturnGeneratedKeys, final boolean isExceptionThrown, final boolean readYearAsInteger) throws SQLException {
         try {
             ShardingSphereDatabase database = ProxyContext.getInstance().getContextManager().getDatabase(connectionSession.getUsedDatabaseName());
             DatabaseType protocolType = database.getProtocolType();
@@ -71,11 +72,9 @@ public final class ProxyJDBCExecutor {
             SQLStatementContext context = queryContext.getSqlStatementContext();
             return jdbcExecutor.execute(executionGroupContext,
                     ProxyJDBCExecutorCallbackFactory.newInstance(type, protocolType, database.getResourceMetaData(), context.getSqlStatement(), databaseProxyConnector, isReturnGeneratedKeys,
-                            isExceptionThrown,
-                            true),
+                            isExceptionThrown, true, readYearAsInteger),
                     ProxyJDBCExecutorCallbackFactory.newInstance(type, protocolType, database.getResourceMetaData(), context.getSqlStatement(), databaseProxyConnector, isReturnGeneratedKeys,
-                            isExceptionThrown,
-                            false));
+                            isExceptionThrown, false, readYearAsInteger));
         } finally {
             processEngine.completeSQLExecution(executionGroupContext.getReportContext().getProcessId());
         }

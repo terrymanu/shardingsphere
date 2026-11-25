@@ -31,6 +31,7 @@ import org.apache.shardingsphere.database.protocol.mysql.packet.command.query.bi
 import org.apache.shardingsphere.database.protocol.mysql.packet.command.query.binary.execute.MySQLBinaryResultSetRowPacket;
 import org.apache.shardingsphere.database.protocol.mysql.packet.command.query.binary.execute.MySQLComStmtExecutePacket;
 import org.apache.shardingsphere.database.protocol.packet.DatabasePacket;
+import org.apache.shardingsphere.infra.annotation.HighFrequencyInvocation;
 import org.apache.shardingsphere.infra.binder.context.aware.ParameterAware;
 import org.apache.shardingsphere.infra.binder.context.statement.SQLStatementContext;
 import org.apache.shardingsphere.infra.session.query.QueryContext;
@@ -164,10 +165,12 @@ public final class MySQLComStmtExecuteExecutor implements QueryCommandExecutor {
         return new MySQLBinaryResultSetRowPacket(createBinaryRow(queryResponseRow));
     }
     
+    @HighFrequencyInvocation
     private BinaryRow createBinaryRow(final QueryResponseRow queryResponseRow) {
         List<BinaryCell> result = new ArrayList<>(queryResponseRow.getCells().size());
         for (QueryResponseCell each : queryResponseRow.getCells()) {
-            result.add(new BinaryCell(MySQLBinaryColumnType.valueOfJDBCType(each.getJdbcType()), each.getData()));
+            MySQLBinaryColumnType columnType = ResponsePacketBuilder.getColumnType(each.getJdbcType(), each.getColumnTypeName().orElse(null));
+            result.add(new BinaryCell(columnType, each.getData()));
         }
         return new BinaryRow(result);
     }

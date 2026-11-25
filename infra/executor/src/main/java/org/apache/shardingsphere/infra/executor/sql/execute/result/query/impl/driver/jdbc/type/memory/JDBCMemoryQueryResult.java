@@ -23,6 +23,8 @@ import org.apache.shardingsphere.infra.executor.sql.execute.result.query.type.me
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.Optional;
 
 /**
@@ -37,7 +39,11 @@ public final class JDBCMemoryQueryResult extends AbstractMemoryQueryResult {
     }
     
     public JDBCMemoryQueryResult(final ResultSet resultSet, final DatabaseType databaseType, final boolean containsJDBCResultSet) throws SQLException {
-        super(new JDBCQueryResultMetaData(resultSet.getMetaData()), new QueryResultDataRowLoader(databaseType).load(resultSet.getMetaData().getColumnCount(), resultSet));
+        this(resultSet, databaseType, containsJDBCResultSet, Collections.emptySet());
+    }
+    
+    public JDBCMemoryQueryResult(final ResultSet resultSet, final DatabaseType databaseType, final boolean containsJDBCResultSet, final Collection<Integer> integerColumnIndexes) throws SQLException {
+        super(new JDBCQueryResultMetaData(resultSet.getMetaData()), new QueryResultDataRowLoader(databaseType).load(resultSet.getMetaData().getColumnCount(), resultSet, integerColumnIndexes));
         jdbcResultSet = containsJDBCResultSet ? resultSet : null;
     }
     

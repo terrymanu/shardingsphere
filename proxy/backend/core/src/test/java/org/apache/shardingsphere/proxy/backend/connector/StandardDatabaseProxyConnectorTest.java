@@ -41,8 +41,11 @@ import org.apache.shardingsphere.infra.exception.kernel.metadata.rule.EmptyRuleE
 import org.apache.shardingsphere.infra.executor.sql.context.ExecutionContext;
 import org.apache.shardingsphere.infra.executor.sql.context.ExecutionUnit;
 import org.apache.shardingsphere.infra.executor.sql.context.SQLUnit;
+import org.apache.shardingsphere.infra.executor.sql.execute.engine.ConnectionMode;
 import org.apache.shardingsphere.infra.executor.sql.execute.result.query.QueryResult;
 import org.apache.shardingsphere.infra.executor.sql.execute.result.query.QueryResultMetaData;
+import org.apache.shardingsphere.infra.executor.sql.execute.result.query.impl.driver.jdbc.type.memory.JDBCMemoryQueryResult;
+import org.apache.shardingsphere.infra.executor.sql.execute.result.query.impl.driver.jdbc.type.stream.JDBCStreamQueryResult;
 import org.apache.shardingsphere.infra.executor.sql.execute.result.update.UpdateResult;
 import org.apache.shardingsphere.infra.executor.sql.prepare.driver.jdbc.JDBCDriverType;
 import org.apache.shardingsphere.infra.hint.HintValueContext;
@@ -58,6 +61,7 @@ import org.apache.shardingsphere.infra.metadata.statistics.ShardingSphereStatist
 import org.apache.shardingsphere.infra.metadata.statistics.builder.ShardingSphereStatisticsFactory;
 import org.apache.shardingsphere.infra.route.context.RouteContext;
 import org.apache.shardingsphere.infra.rule.attribute.datanode.DataNodeRuleAttribute;
+import org.apache.shardingsphere.infra.rule.attribute.raw.RawExecutionRuleAttribute;
 import org.apache.shardingsphere.infra.session.connection.ConnectionContext;
 import org.apache.shardingsphere.infra.session.connection.cursor.CursorConnectionContext;
 import org.apache.shardingsphere.infra.session.query.QueryContext;
@@ -69,11 +73,13 @@ import org.apache.shardingsphere.mode.metadata.refresher.federation.FederationMe
 import org.apache.shardingsphere.mode.metadata.refresher.pushdown.PushDownMetaDataRefreshEngine;
 import org.apache.shardingsphere.parser.config.SQLParserRuleConfiguration;
 import org.apache.shardingsphere.parser.rule.SQLParserRule;
+import org.apache.shardingsphere.proxy.backend.connector.jdbc.executor.callback.ProxyJDBCExecutorCallback;
 import org.apache.shardingsphere.proxy.backend.connector.jdbc.fixture.QueryHeaderBuilderFixture;
 import org.apache.shardingsphere.proxy.backend.connector.jdbc.statement.JDBCBackendStatement;
 import org.apache.shardingsphere.proxy.backend.connector.jdbc.transaction.ProxyBackendTransactionManager;
 import org.apache.shardingsphere.proxy.backend.context.BackendExecutorContext;
 import org.apache.shardingsphere.proxy.backend.context.ProxyContext;
+import org.apache.shardingsphere.proxy.backend.response.data.QueryResponseCell;
 import org.apache.shardingsphere.proxy.backend.response.header.ResponseHeader;
 import org.apache.shardingsphere.proxy.backend.response.header.query.QueryHeader;
 import org.apache.shardingsphere.proxy.backend.response.header.query.QueryHeaderBuilder;
@@ -104,6 +110,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Answers;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockedConstruction;
 import org.mockito.MockedStatic;
@@ -111,6 +118,7 @@ import org.mockito.internal.configuration.plugins.Plugins;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
+import java.sql.Date;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
@@ -126,6 +134,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
+import static org.apache.shardingsphere.test.infra.framework.matcher.ShardingSphereAssertionMatchers.deepEqual;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.isA;
@@ -422,10 +431,14 @@ class StandardDatabaseProxyConnectorTest {
         assertNotNull(createDatabaseProxyConnector(JDBCDriverType.STATEMENT, createQueryContext(sqlStatementContext, mockDatabase())));
     }
     
-    @Test
-    void assertExecuteWithFederation() throws SQLException {
-        SQLStatementContext sqlStatementContext = createSQLStatementContext(SelectStatement.builder().databaseType(databaseType).build());
-        QueryContext queryContext = createQueryContext(sqlStatementContext, mockDatabase());
+    @ParameterizedTest(name = "{0}, {1}")
+    @MethodSource("getFederationYearExecutions")
+    void assertExecuteWithFederation(final JDBCDriverType driverType, final ConnectionMode connectionMode) throws SQLException {
+        DatabaseType mysqlDatabaseType = TypedSPILoader.getService(DatabaseType.class, "MySQL");
+        ShardingSphereDatabase database = mockDatabase();
+        when(database.getProtocolType()).thenReturn(mysqlDatabaseType);
+        SQLStatementContext sqlStatementContext = createSQLStatementContext(SelectStatement.builder().databaseType(mysqlDatabaseType).build());
+        QueryContext queryContext = createQueryContext(sqlStatementContext, database);
         ProxySQLExecutor proxySQLExecutor = mock(ProxySQLExecutor.class, RETURNS_DEEP_STUBS);
         SQLFederationEngine sqlFederationEngine = mock(SQLFederationEngine.class);
         when(proxySQLExecutor.getSqlFederationEngine()).thenReturn(sqlFederationEngine);
@@ -435,12 +448,40 @@ class StandardDatabaseProxyConnectorTest {
         when(resultSet.getMetaData().getColumnCount()).thenReturn(1);
         when(resultSet.getMetaData().getColumnName(1)).thenReturn("order_id");
         when(resultSet.getMetaData().getColumnLabel(1)).thenReturn("order_id");
-        DatabaseProxyConnector engine = createDatabaseProxyConnector(JDBCDriverType.STATEMENT, queryContext);
+        DatabaseProxyConnector engine = createDatabaseProxyConnector(driverType, queryContext);
         setField(engine, "proxySQLExecutor", proxySQLExecutor);
         try (MockedStatic<DatabaseTypedSPILoader> spiLoader = mockStatic(DatabaseTypedSPILoader.class)) {
             spiLoader.when(() -> DatabaseTypedSPILoader.getService(eq(QueryHeaderBuilder.class), any(DatabaseType.class))).thenReturn(new QueryHeaderBuilderFixture());
             assertThat(engine.execute(), isA(QueryResponseHeader.class));
         }
+        ArgumentCaptor<ProxyJDBCExecutorCallback> callbackCaptor = ArgumentCaptor.forClass(ProxyJDBCExecutorCallback.class);
+        verify(sqlFederationEngine).executeQuery(any(), callbackCaptor.capture(), any());
+        ResultSet jdbcResultSet = mock(ResultSet.class, RETURNS_DEEP_STUBS);
+        Date expected = Date.valueOf("2000-01-01");
+        when(jdbcResultSet.getMetaData().getColumnCount()).thenReturn(1);
+        when(jdbcResultSet.getMetaData().getColumnType(1)).thenReturn(Types.DATE);
+        when(jdbcResultSet.getMetaData().getColumnTypeName(1)).thenReturn("YEAR");
+        when(jdbcResultSet.getObject(1)).thenReturn(expected);
+        when(jdbcResultSet.next()).thenReturn(true, false);
+        Statement jdbcStatement = JDBCDriverType.STATEMENT == driverType ? mock(Statement.class) : mock(PreparedStatement.class);
+        String sql = "SELECT year_value FROM foo_table";
+        if (JDBCDriverType.STATEMENT == driverType) {
+            when(jdbcStatement.execute(sql, Statement.NO_GENERATED_KEYS)).thenReturn(true);
+        } else {
+            when(((PreparedStatement) jdbcStatement).execute()).thenReturn(true);
+        }
+        when(jdbcStatement.getResultSet()).thenReturn(jdbcResultSet);
+        QueryResult actual = (QueryResult) callbackCaptor.getValue().executeSQL(sql, jdbcStatement, connectionMode, mysqlDatabaseType);
+        assertTrue(actual.next());
+        assertThat(actual.getValue(1, Object.class), is(expected));
+    }
+    
+    private static Stream<Arguments> getFederationYearExecutions() {
+        return Stream.of(
+                Arguments.of(JDBCDriverType.STATEMENT, ConnectionMode.MEMORY_STRICTLY),
+                Arguments.of(JDBCDriverType.STATEMENT, ConnectionMode.CONNECTION_STRICTLY),
+                Arguments.of(JDBCDriverType.PREPARED_STATEMENT, ConnectionMode.MEMORY_STRICTLY),
+                Arguments.of(JDBCDriverType.PREPARED_STATEMENT, ConnectionMode.CONNECTION_STRICTLY));
     }
     
     @ParameterizedTest(name = "{0}, Federation enabled: {1}, SELECT: {2}")
@@ -581,6 +622,84 @@ class StandardDatabaseProxyConnectorTest {
             verify(queryHeaderBuilder).build(any(ShardingSphereResultSetMetaData.class), any(), eq("order_id"), eq("order_id"), eq(1));
             verify(queryHeaderBuilder).appendProtocolAttributes(queryHeader, resultSet);
         }
+    }
+    
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("getYearHeaderSelections")
+    void assertExecuteWithYearHeader(final String name, final String protocolTypeName, final boolean federationEnabled, final Class<? extends QueryResult> resultType, final boolean advanced,
+                                     final boolean raw, final String columnTypeName, final int columnType, final int expectedColumnType, final Object expected) throws SQLException {
+        ShardingSphereDatabase database = mockDatabase();
+        DatabaseType protocolType = TypedSPILoader.getService(DatabaseType.class, protocolTypeName);
+        when(database.getProtocolType()).thenReturn(protocolType);
+        when(database.getRuleMetaData().getAttributes(RawExecutionRuleAttribute.class)).thenReturn(raw ? Collections.singleton(mock(RawExecutionRuleAttribute.class)) : Collections.emptyList());
+        SQLStatementContext sqlStatementContext = createSQLStatementContext(new SQLStatement(protocolType));
+        QueryContext queryContext = createQueryContext(sqlStatementContext, database);
+        ProxySQLExecutor proxySQLExecutor = mock(ProxySQLExecutor.class, RETURNS_DEEP_STUBS);
+        SQLFederationEngine federationEngine = mock(SQLFederationEngine.class);
+        when(federationEngine.isSQLFederationEnabled()).thenReturn(federationEnabled);
+        when(proxySQLExecutor.getSqlFederationEngine()).thenReturn(federationEngine);
+        DatabaseProxyConnector engine = createDatabaseProxyConnector(JDBCDriverType.STATEMENT, queryContext);
+        setField(engine, "proxySQLExecutor", proxySQLExecutor);
+        SQLFederationRule replacement = mock(SQLFederationRule.class);
+        when(replacement.isSqlFederationEnabled()).thenReturn(!federationEnabled);
+        RuleMetaData globalRuleMetaData = ProxyContext.getInstance().getContextManager().getMetaDataContexts().getMetaData().getGlobalRuleMetaData();
+        globalRuleMetaData.getRules().remove(sqlFederationRule);
+        globalRuleMetaData.getRules().add(replacement);
+        ExecutionContext executionContext = mock(ExecutionContext.class, RETURNS_DEEP_STUBS);
+        when(executionContext.getExecutionUnits()).thenReturn(Collections.singletonList(mock(ExecutionUnit.class)));
+        when(executionContext.getSqlStatementContext()).thenReturn(sqlStatementContext);
+        QueryResult queryResult = mock(resultType);
+        QueryResultMetaData queryResultMetaData = mock(QueryResultMetaData.class);
+        ResultSetMetaData resultSetMetaData = mock(ResultSetMetaData.class);
+        when(queryResultMetaData.getColumnCount()).thenReturn(1);
+        when(queryResultMetaData.getResultSetMetaData()).thenReturn(resultSetMetaData);
+        when(resultSetMetaData.getColumnName(1)).thenReturn("foo_col");
+        when(resultSetMetaData.getColumnLabel(1)).thenReturn("foo_label");
+        when(queryResult.getMetaData()).thenReturn(queryResultMetaData);
+        when(proxySQLExecutor.execute(executionContext)).thenReturn(Collections.singletonList(queryResult));
+        AdvancedProxySQLExecutor advancedExecutor = mock(AdvancedProxySQLExecutor.class);
+        when(advancedExecutor.execute(eq(executionContext), any(ContextManager.class), eq(database), any(DatabaseProxyConnector.class))).thenReturn(Collections.singletonList(queryResult));
+        MergedResult mergedResult = mock(MergedResult.class);
+        when(mergedResult.getValue(1, Object.class)).thenReturn(expected);
+        DialectDatabaseMetaData dialectDatabaseMetaData = mock(DialectDatabaseMetaData.class);
+        when(dialectDatabaseMetaData.getTransactionOption()).thenReturn(mock(DialectTransactionOption.class));
+        QueryHeaderBuilder queryHeaderBuilder = mock(QueryHeaderBuilder.class);
+        QueryHeader header = new QueryHeader("foo_schema", "foo_table", "foo_label", "foo_col", columnType, columnTypeName, 4, 0, false, true, true, true);
+        header.getProtocolAttributes().put("foo_attribute", "foo_value");
+        QueryHeader expectedHeader = new QueryHeader("foo_schema", "foo_table", "foo_label", "foo_col", expectedColumnType, columnTypeName, 4, 0, false, true, true, true);
+        expectedHeader.getProtocolAttributes().put("foo_attribute", "foo_value");
+        when(queryHeaderBuilder.build(any(ShardingSphereResultSetMetaData.class), any(), eq("foo_col"), eq("foo_label"), eq(1))).thenReturn(header);
+        try (
+                MockedConstruction<KernelProcessor> ignoredKernel = mockConstruction(KernelProcessor.class,
+                        (mock, context) -> when(mock.generateExecutionContext(any(QueryContext.class), any(RuleMetaData.class), any(ConfigurationProperties.class))).thenReturn(executionContext));
+                MockedConstruction<DatabaseTypeRegistry> ignoredRegistry = mockConstruction(DatabaseTypeRegistry.class,
+                        (mock, context) -> when(mock.getDialectDatabaseMetaData()).thenReturn(dialectDatabaseMetaData));
+                MockedConstruction<MergeEngine> ignoredMerge = mockConstruction(MergeEngine.class, (mock, context) -> when(mock.merge(anyList(), any(QueryContext.class))).thenReturn(mergedResult));
+                MockedStatic<DatabaseTypedSPILoader> spiLoader = mockStatic(DatabaseTypedSPILoader.class);
+                MockedStatic<ShardingSphereServiceLoader> serviceLoader = mockStatic(ShardingSphereServiceLoader.class)) {
+            spiLoader.when(() -> DatabaseTypedSPILoader.getService(eq(QueryHeaderBuilder.class), any(DatabaseType.class))).thenReturn(queryHeaderBuilder);
+            serviceLoader.when(() -> ShardingSphereServiceLoader.getServiceInstances(AdvancedProxySQLExecutor.class))
+                    .thenReturn(advanced ? Collections.singletonList(advancedExecutor) : Collections.emptyList());
+            QueryResponseHeader actual = (QueryResponseHeader) engine.execute();
+            assertThat(actual.getQueryHeaders().get(0), deepEqual(expectedHeader));
+            QueryResponseCell actualCell = engine.getRowData().getCells().get(0);
+            assertThat(actualCell.getJdbcType(), is(expectedColumnType));
+            assertThat(actualCell.getColumnTypeName(), is(Optional.of(columnTypeName)));
+            assertThat(actualCell.getData(), sameInstance(expected));
+        }
+    }
+    
+    private static Stream<Arguments> getYearHeaderSelections() {
+        return Stream.of(
+                Arguments.of("disabled-stream", "MySQL", false, JDBCStreamQueryResult.class, false, false, "YEAR", Types.DATE, Types.INTEGER, 0),
+                Arguments.of("disabled-memory", "MySQL", false, JDBCMemoryQueryResult.class, false, false, "YEAR", Types.DATE, Types.INTEGER, 0),
+                Arguments.of("enabled-ordinary", "MySQL", true, JDBCStreamQueryResult.class, false, false, "YEAR", Types.DATE, Types.DATE, Date.valueOf("2000-01-01")),
+                Arguments.of("enabled-smallint", "MySQL", true, JDBCStreamQueryResult.class, false, false, "YEAR", Types.SMALLINT, Types.SMALLINT, (short) 2000),
+                Arguments.of("other-protocol", "FIXTURE", false, JDBCStreamQueryResult.class, false, false, "YEAR", Types.DATE, Types.DATE, Date.valueOf("2000-01-01")),
+                Arguments.of("ordinary-date", "MySQL", false, JDBCStreamQueryResult.class, false, false, "DATE", Types.DATE, Types.DATE, Date.valueOf("2000-01-01")),
+                Arguments.of("sane-result", "MySQL", false, QueryResult.class, false, false, "YEAR", Types.DATE, Types.DATE, Date.valueOf("2000-01-01")),
+                Arguments.of("raw-jdbc-result", "MySQL", false, JDBCStreamQueryResult.class, false, true, "YEAR", Types.DATE, Types.DATE, Date.valueOf("2000-01-01")),
+                Arguments.of("advanced-jdbc-result", "MySQL", false, JDBCStreamQueryResult.class, true, false, "YEAR", Types.DATE, Types.DATE, Date.valueOf("2000-01-01")));
     }
     
     @Test
