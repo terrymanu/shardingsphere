@@ -19,7 +19,6 @@ package org.apache.shardingsphere.proxy.backend.response.header.query;
 
 import org.apache.shardingsphere.database.connector.core.spi.DatabaseTypedSPI;
 import org.apache.shardingsphere.driver.jdbc.core.resultset.ShardingSphereResultSetMetaData;
-import org.apache.shardingsphere.infra.annotation.HighFrequencyInvocation;
 import org.apache.shardingsphere.infra.metadata.database.ShardingSphereDatabase;
 import org.apache.shardingsphere.infra.spi.annotation.SingletonSPI;
 
@@ -47,26 +46,12 @@ public interface QueryHeaderBuilder extends DatabaseTypedSPI {
     QueryHeader build(ShardingSphereResultSetMetaData resultSetMetaData, ShardingSphereDatabase database, String columnName, String columnLabel, int columnIndex) throws SQLException;
     
     /**
-     * Append protocol attributes to a query header built by this builder before it is published.
-     *
-     * @param queryHeader query header
-     * @param resultSet JDBC result set
-     * @throws SQLException SQL exception
-     */
-    default void appendProtocolAttributes(final QueryHeader queryHeader, final ResultSet resultSet) throws SQLException {
-    }
-    
-    /**
      * Append protocol attributes to query headers.
      *
      * @param queryHeaders query headers
      * @param resultSet JDBC result set
      * @throws SQLException SQL exception
      */
-    @HighFrequencyInvocation
     default void appendProtocolAttributes(final Collection<QueryHeader> queryHeaders, final ResultSet resultSet) throws SQLException {
-        for (QueryHeader each : queryHeaders) {
-            appendProtocolAttributes(each, resultSet);
-        }
     }
 }

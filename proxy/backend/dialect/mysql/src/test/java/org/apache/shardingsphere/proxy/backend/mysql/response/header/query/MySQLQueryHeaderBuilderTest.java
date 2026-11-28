@@ -20,6 +20,7 @@ package org.apache.shardingsphere.proxy.backend.mysql.response.header.query;
 import org.apache.shardingsphere.database.connector.core.spi.DatabaseTypedSPILoader;
 import org.apache.shardingsphere.database.connector.core.type.DatabaseType;
 import org.apache.shardingsphere.database.connector.core.type.DatabaseTypeFactory;
+import org.apache.shardingsphere.database.protocol.mysql.constant.MySQLBinaryColumnType;
 import org.apache.shardingsphere.driver.jdbc.core.resultset.ShardingSphereResultSetMetaData;
 import org.apache.shardingsphere.infra.metadata.database.ShardingSphereDatabase;
 import org.apache.shardingsphere.infra.metadata.database.rule.RuleMetaData;
@@ -208,7 +209,7 @@ class MySQLQueryHeaderBuilderTest {
         DatabaseType sqlserver = mock(DatabaseType.class);
         when(sqlserver.getType()).thenReturn("SQLServer");
         return Stream.of(
-                Arguments.of("mysql", TypedSPILoader.getService(DatabaseType.class, "MySQL"), Collections.singletonMap(MySQLQueryHeaderBuilder.MYSQL_DATETIME, true)),
+                Arguments.of("mysql", TypedSPILoader.getService(DatabaseType.class, "MySQL"), Collections.singletonMap(MySQLQueryHeaderBuilder.COLUMN_TYPE, MySQLBinaryColumnType.DATETIME)),
                 Arguments.of("sqlserver", sqlserver, Collections.emptyMap()),
                 Arguments.of("mysql-trunk-only", TypedSPILoader.getService(DatabaseType.class, "H2"), Collections.emptyMap()));
     }
@@ -238,8 +239,8 @@ class MySQLQueryHeaderBuilderTest {
         when(resultSet.getStatement().getConnection().getMetaData()).thenReturn(metaData);
         when(DatabaseTypeFactory.get(metaData)).thenReturn(TypedSPILoader.getService(DatabaseType.class, "MySQL"));
         queryHeaderBuilder.appendProtocolAttributes(Arrays.asList(first, second), resultSet);
-        assertThat(first.getProtocolAttributes(), is(Collections.singletonMap(MySQLQueryHeaderBuilder.MYSQL_DATETIME, true)));
-        assertThat(second.getProtocolAttributes(), is(Collections.singletonMap(MySQLQueryHeaderBuilder.MYSQL_DATETIME, true)));
+        assertThat(first.getProtocolAttributes(), is(Collections.singletonMap(MySQLQueryHeaderBuilder.COLUMN_TYPE, MySQLBinaryColumnType.DATETIME)));
+        assertThat(second.getProtocolAttributes(), is(Collections.singletonMap(MySQLQueryHeaderBuilder.COLUMN_TYPE, MySQLBinaryColumnType.DATETIME)));
         verify(resultSet.getStatement().getConnection()).getMetaData();
     }
     
@@ -252,15 +253,5 @@ class MySQLQueryHeaderBuilderTest {
         queryHeaderBuilder.appendProtocolAttributes(Collections.singleton(actual), resultSet);
         assertTrue(actual.getProtocolAttributes().isEmpty());
         verifyNoInteractions(resultSet);
-    }
-    
-    @Test
-    void assertAppendProtocolAttributesWithSingleHeader() throws SQLException {
-        mockFederationRule();
-        QueryHeader actual = new QueryHeader("foo_db", "foo_table", "foo_datetime", "foo_datetime", Types.TIMESTAMP, "DATETIME", 26, 6, true, false, false, false);
-        ResultSet resultSet = mock(ResultSet.class, RETURNS_DEEP_STUBS);
-        when(DatabaseTypeFactory.get(resultSet.getStatement().getConnection().getMetaData())).thenReturn(TypedSPILoader.getService(DatabaseType.class, "MySQL"));
-        queryHeaderBuilder.appendProtocolAttributes(actual, resultSet);
-        assertThat(actual.getProtocolAttributes(), is(Collections.singletonMap(MySQLQueryHeaderBuilder.MYSQL_DATETIME, true)));
     }
 }

@@ -104,7 +104,7 @@ class QueryHeaderBuilderEngineTest {
             spiLoader.when(() -> DatabaseTypedSPILoader.getService(QueryHeaderBuilder.class, databaseType)).thenReturn(queryHeaderBuilder);
             QueryHeader actualQueryHeader = new QueryHeaderBuilderEngine(databaseType).build(sqlStatementContext, resultSetMetaData, resultSet, database, 1);
             assertThat(actualQueryHeader, is(expectedQueryHeader));
-            verify(queryHeaderBuilder).appendProtocolAttributes(expectedQueryHeader, resultSet);
+            verify(queryHeaderBuilder).appendProtocolAttributes(Collections.singleton(expectedQueryHeader), resultSet);
         }
     }
     

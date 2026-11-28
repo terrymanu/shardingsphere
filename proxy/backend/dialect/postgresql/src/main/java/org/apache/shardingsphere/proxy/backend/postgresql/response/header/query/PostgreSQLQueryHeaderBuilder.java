@@ -20,6 +20,7 @@ package org.apache.shardingsphere.proxy.backend.postgresql.response.header.query
 import org.apache.shardingsphere.database.protocol.postgresql.type.ColumnTypeOIDResolver;
 import org.apache.shardingsphere.database.protocol.postgresql.type.PostgreSQLColumnTypeOIDResolver;
 import org.apache.shardingsphere.driver.jdbc.core.resultset.ShardingSphereResultSetMetaData;
+import org.apache.shardingsphere.infra.annotation.HighFrequencyInvocation;
 import org.apache.shardingsphere.infra.metadata.database.ShardingSphereDatabase;
 import org.apache.shardingsphere.proxy.backend.response.header.query.QueryHeader;
 import org.apache.shardingsphere.proxy.backend.response.header.query.QueryHeaderBuilder;
@@ -27,6 +28,7 @@ import org.apache.shardingsphere.proxy.backend.response.header.query.QueryHeader
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Types;
+import java.util.Collection;
 
 /**
  * Query header builder for PostgreSQL.
@@ -53,10 +55,12 @@ public final class PostgreSQLQueryHeaderBuilder implements QueryHeaderBuilder {
     }
     
     @Override
-    public void appendProtocolAttributes(final QueryHeader queryHeader, final ResultSet resultSet) throws SQLException {
-        if (Types.STRUCT == queryHeader.getColumnType()) {
-            columnTypeOIDResolver.findTypeOID(resultSet.getStatement().getConnection(), queryHeader.getColumnTypeName())
-                    .ifPresent(optional -> queryHeader.getProtocolAttributes().put(TYPE_OID, optional));
+    @HighFrequencyInvocation
+    public void appendProtocolAttributes(final Collection<QueryHeader> queryHeaders, final ResultSet resultSet) throws SQLException {
+        for (QueryHeader each : queryHeaders) {
+            if (Types.STRUCT == each.getColumnType()) {
+                columnTypeOIDResolver.findTypeOID(resultSet.getStatement().getConnection(), each.getColumnTypeName()).ifPresent(typeOID -> each.getProtocolAttributes().put(TYPE_OID, typeOID));
+            }
         }
     }
     

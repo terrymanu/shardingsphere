@@ -68,9 +68,9 @@ public final class ResponsePacketBuilder {
         result.add(new MySQLFieldCountPacket(queryHeaders.size()));
         for (QueryHeader each : queryHeaders) {
             int characterSet = BINARY_TYPES.contains(each.getColumnType()) || Types.TIME == each.getColumnType() ? MySQLCharacterSets.BINARY.getId() : sessionCharacterSet;
-            boolean mysqlDatetime = Boolean.TRUE.equals(each.getProtocolAttributes().get(MySQLQueryHeaderBuilder.MYSQL_DATETIME));
+            MySQLBinaryColumnType columnType = (MySQLBinaryColumnType) each.getProtocolAttributes().get(MySQLQueryHeaderBuilder.COLUMN_TYPE);
             result.add(new MySQLColumnDefinition41Packet(characterSet, getColumnDefinitionFlag(each), each.getSchema(), each.getTable(), each.getTable(), each.getColumnLabel(), each.getColumnName(),
-                    each.getColumnLength(), MySQLBinaryColumnType.valueOfJDBCType(each.getColumnType(), mysqlDatetime), each.getDecimals(), false));
+                    each.getColumnLength(), null == columnType ? MySQLBinaryColumnType.valueOfJDBCType(each.getColumnType()) : columnType, each.getDecimals(), false));
         }
         result.add(new MySQLEofPacket(statusFlags));
         return result;

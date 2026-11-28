@@ -17,10 +17,9 @@
 
 package org.apache.shardingsphere.proxy.frontend.mysql.command.query.binary.prepare;
 
-import com.google.common.io.ByteStreams;
+import com.google.common.io.Resources;
 import com.mysql.cj.jdbc.JdbcConnection;
 import com.mysql.cj.jdbc.ServerPreparedStatement;
-import org.apache.shardingsphere.database.connector.core.type.DatabaseType;
 import org.apache.shardingsphere.database.connector.core.type.DatabaseTypeFactory;
 import org.apache.shardingsphere.infra.binder.context.segment.table.TablesContext;
 import org.apache.shardingsphere.infra.binder.context.statement.SQLStatementContext;
@@ -53,11 +52,9 @@ import org.mockito.Mock;
 import org.mockito.MockedConstruction;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.sql.Connection;
-import java.sql.DatabaseMetaData;
 import java.sql.PreparedStatement;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
@@ -162,11 +159,8 @@ class MySQLPreparedStatementMetadataFactoryTest {
     }
     
     private void mockStorageType(final Connection connection, final String storageType) throws SQLException {
-        DatabaseMetaData databaseMetaData = mock(DatabaseMetaData.class);
-        when(connection.getMetaData()).thenReturn(databaseMetaData);
-        DatabaseType databaseType = mock(DatabaseType.class);
-        when(databaseType.getType()).thenReturn(storageType);
-        when(DatabaseTypeFactory.get(databaseMetaData)).thenReturn(databaseType);
+        when(connection.getMetaData()).thenReturn(mock());
+        when(DatabaseTypeFactory.get(connection.getMetaData()).getType()).thenReturn(storageType);
     }
     
     @Test
@@ -376,10 +370,7 @@ class MySQLPreparedStatementMetadataFactoryTest {
     }
     
     private Class<?> loadFactoryWithout(final String unavailableClassPrefix) throws IOException {
-        byte[] classBytes;
-        try (InputStream input = MySQLPreparedStatementMetadataFactory.class.getResourceAsStream("MySQLPreparedStatementMetadataFactory.class")) {
-            classBytes = ByteStreams.toByteArray(input);
-        }
+        byte[] classBytes = Resources.toByteArray(MySQLPreparedStatementMetadataFactory.class.getResource("MySQLPreparedStatementMetadataFactory.class"));
         return new ClassLoader(MySQLPreparedStatementMetadataFactory.class.getClassLoader()) {
             
             @Override

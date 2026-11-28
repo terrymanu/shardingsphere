@@ -19,6 +19,7 @@ package org.apache.shardingsphere.proxy.backend.mysql.response.header.query;
 
 import org.apache.shardingsphere.database.connector.core.type.DatabaseType;
 import org.apache.shardingsphere.database.connector.core.type.DatabaseTypeFactory;
+import org.apache.shardingsphere.database.protocol.mysql.constant.MySQLBinaryColumnType;
 import org.apache.shardingsphere.driver.jdbc.core.resultset.ShardingSphereResultSetMetaData;
 import org.apache.shardingsphere.infra.annotation.HighFrequencyInvocation;
 import org.apache.shardingsphere.infra.metadata.database.ShardingSphereDatabase;
@@ -34,7 +35,6 @@ import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Types;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.Optional;
 
 /**
@@ -42,7 +42,7 @@ import java.util.Optional;
  */
 public final class MySQLQueryHeaderBuilder implements QueryHeaderBuilder {
     
-    public static final String MYSQL_DATETIME = "mysqlDatetime";
+    public static final String COLUMN_TYPE = "columnType";
     
     @Override
     @HighFrequencyInvocation
@@ -85,12 +85,6 @@ public final class MySQLQueryHeaderBuilder implements QueryHeaderBuilder {
     
     @Override
     @HighFrequencyInvocation
-    public void appendProtocolAttributes(final QueryHeader queryHeader, final ResultSet resultSet) throws SQLException {
-        appendProtocolAttributes(Collections.singleton(queryHeader), resultSet);
-    }
-    
-    @Override
-    @HighFrequencyInvocation
     public void appendProtocolAttributes(final Collection<QueryHeader> queryHeaders, final ResultSet resultSet) throws SQLException {
         if (ProxyContext.getInstance().getContextManager().getMetaDataContexts().getMetaData().getGlobalRuleMetaData().getSingleRule(SQLFederationRule.class).isSqlFederationEnabled()) {
             return;
@@ -104,7 +98,7 @@ public final class MySQLQueryHeaderBuilder implements QueryHeaderBuilder {
                 storageType = DatabaseTypeFactory.get(resultSet.getStatement().getConnection().getMetaData());
             }
             if ("MySQL".equals(storageType.getType())) {
-                each.getProtocolAttributes().put(MYSQL_DATETIME, true);
+                each.getProtocolAttributes().put(COLUMN_TYPE, MySQLBinaryColumnType.DATETIME);
             }
         }
     }

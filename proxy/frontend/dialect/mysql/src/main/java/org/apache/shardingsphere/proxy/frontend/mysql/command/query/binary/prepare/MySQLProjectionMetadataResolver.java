@@ -97,7 +97,10 @@ public final class MySQLProjectionMetadataResolver {
                     }
                     mysqlDatetime = "MySQL".equals(actualType.getType());
                 }
-                result.add(createMySQLColumnDefinition41Packet(queryHeader, characterSet, mysqlDatetime));
+                MySQLBinaryColumnType columnType = mysqlDatetime && Types.TIMESTAMP == queryHeader.getColumnType()
+                        ? MySQLBinaryColumnType.DATETIME
+                        : MySQLBinaryColumnType.valueOfJDBCType(queryHeader.getColumnType());
+                result.add(createMySQLColumnDefinition41Packet(queryHeader, characterSet, columnType));
             }
             return result;
         }
@@ -115,11 +118,10 @@ public final class MySQLProjectionMetadataResolver {
         return Types.TIMESTAMP == resultSetMetaData.getColumnType(columnIndex) && "DATETIME".equalsIgnoreCase(resultSetMetaData.getColumnTypeName(columnIndex));
     }
     
-    private static MySQLColumnDefinition41Packet createMySQLColumnDefinition41Packet(final QueryHeader queryHeader, final int characterSet, final boolean mysqlDatetime) {
+    private static MySQLColumnDefinition41Packet createMySQLColumnDefinition41Packet(final QueryHeader queryHeader, final int characterSet, final MySQLBinaryColumnType columnType) {
         int actualCharacterSet = BINARY_TYPES.contains(queryHeader.getColumnType()) ? MySQLCharacterSets.BINARY.getId() : characterSet;
         return new MySQLColumnDefinition41Packet(actualCharacterSet, getColumnDefinitionFlag(queryHeader), queryHeader.getSchema(), queryHeader.getTable(), queryHeader.getTable(),
-                queryHeader.getColumnLabel(), queryHeader.getColumnName(), queryHeader.getColumnLength(), MySQLBinaryColumnType.valueOfJDBCType(queryHeader.getColumnType(), mysqlDatetime),
-                queryHeader.getDecimals(), false);
+                queryHeader.getColumnLabel(), queryHeader.getColumnName(), queryHeader.getColumnLength(), columnType, queryHeader.getDecimals(), false);
     }
     
     private static int getColumnDefinitionFlag(final QueryHeader queryHeader) {

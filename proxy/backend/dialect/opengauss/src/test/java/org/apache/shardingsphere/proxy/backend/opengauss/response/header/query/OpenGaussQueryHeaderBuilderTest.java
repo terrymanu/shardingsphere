@@ -29,12 +29,16 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Types;
+import java.util.Arrays;
 import java.util.Optional;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockConstruction;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class OpenGaussQueryHeaderBuilderTest {
@@ -57,23 +61,25 @@ class OpenGaussQueryHeaderBuilderTest {
     
     @Test
     void assertAppendProtocolAttributes() throws SQLException {
-        int columnIndex = 1;
-        ShardingSphereResultSetMetaData resultSetMetaData = mock(ShardingSphereResultSetMetaData.class);
-        when(resultSetMetaData.getColumnType(columnIndex)).thenReturn(Types.STRUCT);
-        when(resultSetMetaData.getColumnTypeName(columnIndex)).thenReturn("record_type");
         ResultSet resultSet = mock(ResultSet.class);
         Statement statement = mock(Statement.class);
         Connection connection = mock(Connection.class);
         when(resultSet.getStatement()).thenReturn(statement);
         when(statement.getConnection()).thenReturn(connection);
         // AutoMockExtension cannot configure constructed mocks, while this scenario requires a non-empty resolver result.
-        try (
-                MockedConstruction<OpenGaussColumnTypeOIDResolver> ignored = mockConstruction(
-                        OpenGaussColumnTypeOIDResolver.class, (mock, context) -> when(mock.findTypeOID(connection, "record_type")).thenReturn(Optional.of(2249)))) {
+        try (MockedConstruction<OpenGaussColumnTypeOIDResolver> mockedConstruction = mockConstruction(OpenGaussColumnTypeOIDResolver.class, (mock, context) -> {
+            when(mock.findTypeOID(connection, "record_type")).thenReturn(Optional.of(2249));
+            when(mock.findTypeOID(connection, "foo_record_type")).thenReturn(Optional.of(2250));
+        })) {
             OpenGaussQueryHeaderBuilder builder = new OpenGaussQueryHeaderBuilder();
-            QueryHeader actual = builder.build(resultSetMetaData, null, null, "record", columnIndex);
-            builder.appendProtocolAttributes(actual, resultSet);
-            assertThat(actual.getProtocolAttributes().get(PostgreSQLQueryHeaderBuilder.TYPE_OID), is(2249));
+            QueryHeader firstHeader = new QueryHeader("", "", "foo_first", "", Types.STRUCT, "record_type", 0, 0, false, false, false, false);
+            QueryHeader ordinaryHeader = new QueryHeader("", "", "foo_id", "", Types.INTEGER, "int", 0, 0, false, false, false, false);
+            QueryHeader secondHeader = new QueryHeader("", "", "foo_second", "", Types.STRUCT, "foo_record_type", 0, 0, false, false, false, false);
+            builder.appendProtocolAttributes(Arrays.asList(firstHeader, ordinaryHeader, secondHeader), resultSet);
+            assertThat(firstHeader.getProtocolAttributes().get(PostgreSQLQueryHeaderBuilder.TYPE_OID), is(2249));
+            assertTrue(ordinaryHeader.getProtocolAttributes().isEmpty());
+            assertThat(secondHeader.getProtocolAttributes().get(PostgreSQLQueryHeaderBuilder.TYPE_OID), is(2250));
+            verify(mockedConstruction.constructed().get(0), never()).findTypeOID(connection, "int");
         }
     }
 }

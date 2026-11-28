@@ -107,7 +107,7 @@ class ResponsePacketBuilderTest {
     
     private static Stream<Arguments> queryResponsePacketsProvider() {
         QueryHeader mysqlDatetimeHeader = new QueryHeader("foo_db", "foo_table", "foo_datetime", "foo_datetime", Types.TIMESTAMP, "DATETIME", 26, 6, true, false, false, false);
-        mysqlDatetimeHeader.getProtocolAttributes().put(MySQLQueryHeaderBuilder.MYSQL_DATETIME, true);
+        mysqlDatetimeHeader.getProtocolAttributes().put(MySQLQueryHeaderBuilder.COLUMN_TYPE, MySQLBinaryColumnType.DATETIME);
         return Stream.of(
                 Arguments.of(
                         "Non-binary column uses session charset and unsigned/auto_increment flags",

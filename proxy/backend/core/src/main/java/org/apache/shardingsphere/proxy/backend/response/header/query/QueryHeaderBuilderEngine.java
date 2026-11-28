@@ -31,6 +31,7 @@ import org.apache.shardingsphere.infra.metadata.database.ShardingSphereDatabase;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Collection;
+import java.util.Collections;
 
 /**
  * Query header builder engine.
@@ -93,7 +94,7 @@ public final class QueryHeaderBuilderEngine {
         QueryHeader result = null == projection
                 ? queryHeaderBuilder.build(resultSetMetaData, database, resultSetMetaData.getColumnName(columnIndex), resultSetMetaData.getColumnLabel(columnIndex), columnIndex)
                 : queryHeaderBuilder.build(resultSetMetaData, database, projection.getColumnName(), projection.getColumnLabel(), columnIndex);
-        queryHeaderBuilder.appendProtocolAttributes(result, resultSet);
+        queryHeaderBuilder.appendProtocolAttributes(Collections.singleton(result), resultSet);
         return result;
     }
     
