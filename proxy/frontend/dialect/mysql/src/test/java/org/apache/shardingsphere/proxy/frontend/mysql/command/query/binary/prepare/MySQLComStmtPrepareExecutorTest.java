@@ -94,7 +94,6 @@ import static org.hamcrest.Matchers.isA;
 import static org.hamcrest.Matchers.sameInstance;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.fail;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
@@ -102,6 +101,8 @@ import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockConstruction;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(AutoMockExtension.class)
@@ -191,23 +192,25 @@ class MySQLComStmtPrepareExecutorTest {
     
     @Test
     void assertPrepareLocalTemporalProjection() throws Exception {
-        when(packet.getSQL()).thenReturn("SELECT mysql_datetime, mysql_timestamp FROM foo_db.user");
+        when(packet.getSQL()).thenReturn("SELECT mysql_datetime, mysql_timestamp, foo_date FROM foo_db.user");
         when(packet.getHintValueContext()).thenReturn(new HintValueContext());
         int connectionId = 17;
         when(connectionSession.getConnectionId()).thenReturn(connectionId);
         when(connectionSession.getCurrentDatabaseName()).thenReturn("foo_db");
         ContextManager contextManager = mockContextManager();
         when(ProxyContext.getInstance().getContextManager()).thenReturn(contextManager);
-        when(MySQLProjectionMetadataResolver.resolveDatetimeColumnIndexes(eq(connectionSession), any(MySQLServerPreparedStatement.class)))
-                .thenReturn(Collections.singleton(1)).thenThrow(AssertionError.class);
+        when(MySQLProjectionMetadataResolver.resolveProjectionPackets(eq(connectionSession), any(MySQLServerPreparedStatement.class), any(SelectStatementContext.class), anyInt()))
+                .thenThrow(AssertionError.class);
         MySQLStatementIdGenerator.getInstance().registerConnection(connectionId);
         try {
             Iterator<DatabasePacket> actual = new MySQLComStmtPrepareExecutor(packet, connectionSession).execute().iterator();
             assertThat(actual.next(), isA(MySQLComStmtPrepareOKPacket.class));
-            assertLocalProjectionPacket((MySQLColumnDefinition41Packet) actual.next(), MySQLBinaryColumnType.DATETIME);
             assertLocalProjectionPacket((MySQLColumnDefinition41Packet) actual.next(), MySQLBinaryColumnType.TIMESTAMP);
+            assertLocalProjectionPacket((MySQLColumnDefinition41Packet) actual.next(), MySQLBinaryColumnType.TIMESTAMP);
+            assertLocalProjectionPacket((MySQLColumnDefinition41Packet) actual.next(), MySQLBinaryColumnType.DATE);
             assertThat(actual.next(), isA(MySQLEofPacket.class));
             assertFalse(actual.hasNext());
+            verify(connectionSession, never()).getDatabaseConnectionManager();
         } finally {
             MySQLStatementIdGenerator.getInstance().unregisterConnection(connectionId);
         }
@@ -237,14 +240,15 @@ class MySQLComStmtPrepareExecutorTest {
         RuleMetaData globalRuleMetaData = contextManager.getMetaDataContexts().getMetaData().getGlobalRuleMetaData();
         SQLFederationRule sqlFederationRule = globalRuleMetaData.getSingleRule(SQLFederationRule.class);
         when(sqlFederationRule.isSqlFederationEnabled()).thenReturn(true);
-        when(MySQLProjectionMetadataResolver.resolveDatetimeColumnIndexes(eq(connectionSession), any(MySQLServerPreparedStatement.class)))
-                .thenAnswer(invocation -> fail("Federation must not add a DATETIME metadata probe"));
+        when(MySQLProjectionMetadataResolver.resolveProjectionPackets(eq(connectionSession), any(MySQLServerPreparedStatement.class), any(SelectStatementContext.class), anyInt()))
+                .thenThrow(AssertionError.class);
         MySQLStatementIdGenerator.getInstance().registerConnection(17);
         try {
             Iterator<DatabasePacket> actual = new MySQLComStmtPrepareExecutor(packet, connectionSession).execute().iterator();
             actual.next();
             assertLocalProjectionPacket((MySQLColumnDefinition41Packet) actual.next(), MySQLBinaryColumnType.TIMESTAMP);
             assertLocalProjectionPacket((MySQLColumnDefinition41Packet) actual.next(), MySQLBinaryColumnType.TIMESTAMP);
+            verify(connectionSession, never()).getDatabaseConnectionManager();
         } finally {
             MySQLStatementIdGenerator.getInstance().unregisterConnection(17);
         }
@@ -266,8 +270,8 @@ class MySQLComStmtPrepareExecutorTest {
         mockLocalTemporalContext();
         String sql = "SELECT mysql_datetime, mysql_timestamp FROM foo_db.user WHERE " + predicate;
         when(packet.getSQL()).thenReturn(sql);
-        when(MySQLProjectionMetadataResolver.resolveDatetimeColumnIndexes(eq(connectionSession), any(MySQLServerPreparedStatement.class)))
-                .thenAnswer(invocation -> fail("Parameterized local PREPARE must not add a DATETIME metadata probe"));
+        when(MySQLProjectionMetadataResolver.resolveProjectionPackets(eq(connectionSession), any(MySQLServerPreparedStatement.class), any(SelectStatementContext.class), anyInt()))
+                .thenThrow(AssertionError.class);
         MySQLStatementIdGenerator.getInstance().registerConnection(17);
         try {
             Iterator<DatabasePacket> actual = new MySQLComStmtPrepareExecutor(packet, connectionSession).execute().iterator();
@@ -293,6 +297,7 @@ class MySQLComStmtPrepareExecutorTest {
             assertThat(actualPreparedStatement.getSql(), is(sql));
             assertThat(actualPreparedStatement.getSqlStatementContext().getSqlStatement().getParameterCount(), is(paramCount));
             assertThat(actualPreparedStatement.getParameterColumnTypes(), is(Collections.nCopies(paramCount, expectedParamType)));
+            verify(connectionSession, never()).getDatabaseConnectionManager();
         } finally {
             MySQLStatementIdGenerator.getInstance().unregisterConnection(17);
         }
@@ -321,64 +326,6 @@ class MySQLComStmtPrepareExecutorTest {
                 Arguments.of("secret = ?", 1, MySQLBinaryColumnType.VAR_STRING),
                 Arguments.of("secret IN (?, ?)", 2, MySQLBinaryColumnType.VAR_STRING),
                 Arguments.of("mysql_datetime = ? AND mysql_timestamp = ?", 2, MySQLBinaryColumnType.TIMESTAMP));
-    }
-    
-    @Test
-    void assertPrepareLocalTemporalProjectionWithNoConfirmedDatetime() throws SQLException {
-        mockLocalTemporalContext();
-        when(MySQLProjectionMetadataResolver.resolveDatetimeColumnIndexes(eq(connectionSession), any(MySQLServerPreparedStatement.class))).thenReturn(Collections.emptySet());
-        MySQLStatementIdGenerator.getInstance().registerConnection(17);
-        try {
-            Iterator<DatabasePacket> actual = new MySQLComStmtPrepareExecutor(packet, connectionSession).execute().iterator();
-            actual.next();
-            assertLocalProjectionPacket((MySQLColumnDefinition41Packet) actual.next(), MySQLBinaryColumnType.TIMESTAMP);
-            assertLocalProjectionPacket((MySQLColumnDefinition41Packet) actual.next(), MySQLBinaryColumnType.TIMESTAMP);
-        } finally {
-            MySQLStatementIdGenerator.getInstance().unregisterConnection(17);
-        }
-    }
-    
-    @Test
-    void assertPrepareLocalTemporalProjectionWithSQLException() throws SQLException {
-        mockLocalTemporalContext();
-        when(MySQLProjectionMetadataResolver.resolveDatetimeColumnIndexes(eq(connectionSession), any(MySQLServerPreparedStatement.class))).thenThrow(SQLException.class);
-        MySQLStatementIdGenerator.getInstance().registerConnection(17);
-        try {
-            Iterator<DatabasePacket> actual = new MySQLComStmtPrepareExecutor(packet, connectionSession).execute().iterator();
-            actual.next();
-            assertLocalProjectionPacket((MySQLColumnDefinition41Packet) actual.next(), MySQLBinaryColumnType.TIMESTAMP);
-            assertLocalProjectionPacket((MySQLColumnDefinition41Packet) actual.next(), MySQLBinaryColumnType.TIMESTAMP);
-        } finally {
-            MySQLStatementIdGenerator.getInstance().unregisterConnection(17);
-        }
-    }
-    
-    @Test
-    void assertPrepareLocalTemporalProjectionWithUnavailableMetadata() throws SQLException {
-        mockLocalTemporalContext();
-        when(MySQLProjectionMetadataResolver.resolveDatetimeColumnIndexes(eq(connectionSession), any(MySQLServerPreparedStatement.class)))
-                .thenThrow(new PreparedStatementMetadataResolutionException("no execution unit was generated"));
-        MySQLStatementIdGenerator.getInstance().registerConnection(17);
-        try {
-            Iterator<DatabasePacket> actual = new MySQLComStmtPrepareExecutor(packet, connectionSession).execute().iterator();
-            actual.next();
-            assertLocalProjectionPacket((MySQLColumnDefinition41Packet) actual.next(), MySQLBinaryColumnType.TIMESTAMP);
-            assertLocalProjectionPacket((MySQLColumnDefinition41Packet) actual.next(), MySQLBinaryColumnType.TIMESTAMP);
-        } finally {
-            MySQLStatementIdGenerator.getInstance().unregisterConnection(17);
-        }
-    }
-    
-    @Test
-    void assertPrepareLocalTemporalProjectionWithUnexpectedError() throws SQLException {
-        mockLocalTemporalContext();
-        when(MySQLProjectionMetadataResolver.resolveDatetimeColumnIndexes(eq(connectionSession), any(MySQLServerPreparedStatement.class))).thenThrow(IllegalStateException.class);
-        MySQLStatementIdGenerator.getInstance().registerConnection(17);
-        try {
-            assertThrows(IllegalStateException.class, () -> new MySQLComStmtPrepareExecutor(packet, connectionSession).execute());
-        } finally {
-            MySQLStatementIdGenerator.getInstance().unregisterConnection(17);
-        }
     }
     
     @Test
@@ -416,13 +363,14 @@ class MySQLComStmtPrepareExecutorTest {
     void assertPrepareLocalNonTemporalProjection(final String column, final MySQLBinaryColumnType expectedType) throws SQLException {
         mockLocalTemporalContext();
         when(packet.getSQL()).thenReturn("SELECT " + column + " FROM foo_db.user");
-        when(MySQLProjectionMetadataResolver.resolveDatetimeColumnIndexes(eq(connectionSession), any(MySQLServerPreparedStatement.class)))
-                .thenAnswer(invocation -> fail("Non-TIMESTAMP projections must not add a DATETIME metadata probe"));
+        when(MySQLProjectionMetadataResolver.resolveProjectionPackets(eq(connectionSession), any(MySQLServerPreparedStatement.class), any(SelectStatementContext.class), anyInt()))
+                .thenThrow(AssertionError.class);
         MySQLStatementIdGenerator.getInstance().registerConnection(17);
         try {
             Iterator<DatabasePacket> actual = new MySQLComStmtPrepareExecutor(packet, connectionSession).execute().iterator();
             actual.next();
             assertThat(getColumnDefinitionType((MySQLColumnDefinition41Packet) actual.next()), is(expectedType.getValue()));
+            verify(connectionSession, never()).getDatabaseConnectionManager();
         } finally {
             MySQLStatementIdGenerator.getInstance().unregisterConnection(17);
         }

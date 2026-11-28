@@ -45,9 +45,7 @@ import java.sql.Types;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.HashSet;
-import java.util.Set;
 
 /**
  * Projection metadata resolver for MySQL prepared statements.
@@ -151,29 +149,5 @@ public final class MySQLProjectionMetadataResolver {
     
     private static boolean isCharacterLargeObject(final int jdbcType) {
         return Types.CLOB == jdbcType || Types.NCLOB == jdbcType;
-    }
-    
-    /**
-     * Resolve native MySQL DATETIME column indexes.
-     *
-     * @param connectionSession connection session
-     * @param preparedStatement prepared statement
-     * @return confirmed DATETIME column indexes
-     * @throws SQLException SQL exception
-     */
-    @HighFrequencyInvocation
-    public static Set<Integer> resolveDatetimeColumnIndexes(final ConnectionSession connectionSession, final MySQLServerPreparedStatement preparedStatement) throws SQLException {
-        ResultSetMetaData resultSetMetaData = MySQLPreparedStatementMetadataFactory.loadMetadataWithoutExecution(connectionSession, preparedStatement);
-        if (null == resultSetMetaData) {
-            return Collections.emptySet();
-        }
-        int columnCount = resultSetMetaData.getColumnCount();
-        Set<Integer> result = new HashSet<>(columnCount, 1F);
-        for (int columnIndex = 1; columnIndex <= columnCount; columnIndex++) {
-            if (isDatetime(resultSetMetaData, columnIndex)) {
-                result.add(columnIndex);
-            }
-        }
-        return result;
     }
 }
